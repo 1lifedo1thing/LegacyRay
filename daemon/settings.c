@@ -25,6 +25,32 @@ void daemon_settings_defaults(daemon_settings_t *s) {
     s->force_pf_mode = SENKO_PF_MODE_AUTO;
     s->sub_ignore_gating = 0;
     s->trace = 0;
+    s->rules_enabled = 1;
+    s->rules_default = 0;
+    s->bypass_lan = 1;
+    s->sub_panel_title = 0;
+    snprintf(s->xray_version, sizeof s->xray_version, "26.7.28");
+    snprintf(s->sub_user_agent, sizeof s->sub_user_agent, "Happ/3.26.1");
+}
+
+/* x.y.z with every part 0..255, the shape the reality session id carries */
+static int version_ok(const char *val, size_t len) {
+    unsigned parts = 0, cur = 0;
+    int digits = 0;
+    if (len == 0 || len >= 16) return 0;
+    for (size_t i = 0; i < len; ++i) {
+        if (val[i] >= '0' && val[i] <= '9') {
+            cur = cur * 10u + (unsigned)(val[i] - '0');
+            if (cur > 255u || ++digits > 3) return 0;
+        } else if (val[i] == '.' && digits) {
+            ++parts;
+            cur = 0;
+            digits = 0;
+        } else {
+            return 0;
+        }
+    }
+    return digits && parts == 2;
 }
 
 const char *daemon_settings_backend_name(senko_backend_force_t forced) {
@@ -195,6 +221,46 @@ settings_status_t daemon_settings_set(daemon_settings_t *s,
         s->trace = b;
         return SETTINGS_OK;
     }
+    if (key_is(key, key_len, "rules_enabled")) {
+        int b;
+        if (parse_bool01(val, ve, &b) != 0) return SETTINGS_ERR_VALUE;
+        s->rules_enabled = b;
+        return SETTINGS_OK;
+    }
+    if (key_is(key, key_len, "rules_default")) {
+        if (val_len == 5 && memcmp(val, "proxy", 5) == 0) s->rules_default = 0;
+        else if (val_len == 6 && memcmp(val, "direct", 6) == 0) s->rules_default = 1;
+        else return SETTINGS_ERR_VALUE;
+        return SETTINGS_OK;
+    }
+    if (key_is(key, key_len, "bypass_lan")) {
+        int b;
+        if (parse_bool01(val, ve, &b) != 0) return SETTINGS_ERR_VALUE;
+        s->bypass_lan = b;
+        return SETTINGS_OK;
+    }
+    if (key_is(key, key_len, "sub_panel_title")) {
+        int b;
+        if (parse_bool01(val, ve, &b) != 0) return SETTINGS_ERR_VALUE;
+        s->sub_panel_title = b;
+        return SETTINGS_OK;
+    }
+    if (key_is(key, key_len, "xray_version")) {
+        if (!version_ok(val, val_len)) return SETTINGS_ERR_VALUE;
+        memcpy(s->xray_version, val, val_len);
+        s->xray_version[val_len] = '\0';
+        return SETTINGS_OK;
+    }
+    if (key_is(key, key_len, "sub_user_agent")) {
+        /* spaces are fine inside a user agent; the SET line keeps everything
+           after the key as the value */
+        if (val_len == 0 || val_len >= sizeof s->sub_user_agent) return SETTINGS_ERR_VALUE;
+        for (size_t i = 0; i < val_len; ++i)
+            if ((unsigned char)val[i] < 0x20 || val[i] == 0x7f) return SETTINGS_ERR_VALUE;
+        memcpy(s->sub_user_agent, val, val_len);
+        s->sub_user_agent[val_len] = '\0';
+        return SETTINGS_OK;
+    }
     return SETTINGS_ERR_KEY;
 }
 
@@ -264,6 +330,12 @@ int daemon_settings_serialize(const daemon_settings_t *s, char *buf, size_t cap,
         SETTINGS_EMIT("SET force_pf_mode %d\n", s->force_pf_mode);
     SETTINGS_EMIT("SET sub_ignore_gating %d\n", s->sub_ignore_gating ? 1 : 0);
     SETTINGS_EMIT("SET trace %d\n", s->trace ? 1 : 0);
+    SETTINGS_EMIT("SET rules_enabled %d\n", s->rules_enabled ? 1 : 0);
+    SETTINGS_EMIT("SET rules_default %s\n", s->rules_default ? "direct" : "proxy");
+    SETTINGS_EMIT("SET bypass_lan %d\n", s->bypass_lan ? 1 : 0);
+    SETTINGS_EMIT("SET sub_panel_title %d\n", s->sub_panel_title ? 1 : 0);
+    SETTINGS_EMIT("SET xray_version %s\n", s->xray_version);
+    SETTINGS_EMIT("SET sub_user_agent %s\n", s->sub_user_agent);
 
 #undef SETTINGS_EMIT
 

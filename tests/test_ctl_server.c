@@ -417,7 +417,7 @@ int main(void) {
 
     write(cli, "STATUS\n", 7);
     exchange(&s, cli, buf, sizeof buf);
-/* senko-kick treats this exact line as proof that a daemon is listening, so the
+/* legacyray-kick treats this exact line as proof that a daemon is listening, so the
    wording is part of the control contract, not just a message */
     ok("status needs auth", strcmp(buf, "ERR auth required\n") == 0);
 

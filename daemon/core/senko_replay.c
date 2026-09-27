@@ -20,7 +20,7 @@ void senko_replay_flush(session_t *s) {
 #include <time.h>
 
 #define REPLAY_MAGIC "SNK1"
-#define REPLAY_DIR   "/var/log/senko-replay"
+#define REPLAY_DIR   "/var/log/legacyray-replay"
 
 #define REPLAY_BUF_MAX (64 * 1024)
 
@@ -104,7 +104,7 @@ void senko_replay_flush(session_t *s) {
     fwrite(s->replay_buf, 1, s->replay_len, f);
     fclose(f);
 
-    fprintf(stderr, "senko-replay: wrote %s chunks=%u bytes=%zu host=%s\n",
+    fprintf(stderr, "legacyray-replay: wrote %s chunks=%u bytes=%zu host=%s\n",
             path, (unsigned)s->replay_chunks, s->replay_len,
             s->trace_host[0] ? s->trace_host : "-");
     fflush(stderr);

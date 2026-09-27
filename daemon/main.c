@@ -74,14 +74,14 @@ static int run_single(const char *link, int port) {
                  srv.mode, srv.host, srv.insecure);
 
     install_signals();
-    fprintf(stderr, "senkod: socks5 on 127.0.0.1:%u -> %s:%u (%s)\n",
+    fprintf(stderr, "legacyrayd: socks5 on 127.0.0.1:%u -> %s:%u (%s)\n",
             loop_listen_port(&lp), srv.host, srv.port,
             srv.remark[0] ? srv.remark : "server");
 
     while (!g_stop) {
         if (loop_step(&lp, 1000) != LOOP_OK) break;
     }
-    fprintf(stderr, "senkod: shutting down\n");
+    fprintf(stderr, "legacyrayd: shutting down\n");
     loop_close(&lp);
     return 0;
 }
@@ -102,7 +102,7 @@ static int run_managed(const char *ctl_path, const char *config_path,
         strncpy(addr.sun_path, ctl_path, sizeof addr.sun_path - 1);
         if (connect(check_fd, (struct sockaddr *)&addr, sizeof addr) == 0) {
             close(check_fd);
-            fprintf(stderr, "senkod: already running\n");
+            fprintf(stderr, "legacyrayd: already running\n");
             return 0;
         } else {
             int connect_errno = errno;
@@ -126,7 +126,7 @@ static int run_managed(const char *ctl_path, const char *config_path,
     }
     uint16_t actual_port = loop_listen_port(&lp);
     if (actual_port != (uint16_t)port) {
-        fprintf(stderr, "senkod: socks port %d is busy; refusing duplicate daemon\n", port);
+        fprintf(stderr, "legacyrayd: socks port %d is busy; refusing duplicate daemon\n", port);
         loop_close(&lp);
         return 1;
     }
@@ -179,29 +179,29 @@ static int run_managed(const char *ctl_path, const char *config_path,
    listener was bound, and reading them again here would put the file back on
    top of the arguments */
         if (storefile_load(&cs.engine.store, NULL, config_path) == STOREFILE_OK)
-            fprintf(stderr, "senkod: loaded %zu server(s) from %s\n",
+            fprintf(stderr, "legacyrayd: loaded %zu server(s) from %s\n",
                     cs.engine.store.n, config_path);
     }
 
     install_signals();
     if (socks_public) {
         fprintf(stderr,
-                "senkod: WARNING socks_public=1 binds SOCKS on 0.0.0.0 "
+                "legacyrayd: WARNING socks_public=1 binds SOCKS on 0.0.0.0 "
                 "(LAN-reachable; disable unless intentional)\n");
     }
-    fprintf(stderr, "senkod: managed mode%s. socks5 on %s:%u, control at %s\n",
+    fprintf(stderr, "legacyrayd: managed mode%s. socks5 on %s:%u, control at %s\n",
             full_device ? " (full-device routing)" : "",
             socks_public ? "0.0.0.0" : "127.0.0.1",
             loop_listen_port(&lp), ctl_path);
 
-/* a daemon started by senko-kick after a reboot has no client to ask for the
+/* a daemon started by legacyray-kick after a reboot has no client to ask for the
    tunnel, so the stored selection is what brings routing back */
     if (dc.settings.auto_connect) {
         if (ctl_server_restore_tunnel(&cs) == 0)
-            fprintf(stderr, "senkod: auto-connected to server %d\n",
+            fprintf(stderr, "legacyrayd: auto-connected to server %d\n",
                     cs.engine.store.selected);
         else
-            fprintf(stderr, "senkod: auto-connect found no server to start\n");
+            fprintf(stderr, "legacyrayd: auto-connect found no server to start\n");
     }
 
     while (!g_stop) {
@@ -214,7 +214,7 @@ static int run_managed(const char *ctl_path, const char *config_path,
         ctl_server_tick(&cs);
     }
 
-    fprintf(stderr, "senkod: shutting down\n");
+    fprintf(stderr, "legacyrayd: shutting down\n");
     daemon_ctl_shutdown(&dc);
     if (config_path && config_path[0])
         storefile_save(&cs.engine.store, &dc.settings, config_path);
@@ -275,7 +275,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "--managed") == 0) {
         daemon_settings_t settings;
         daemon_settings_defaults(&settings);
-        const char *ctl_path = "/var/tmp/senkod.sock";
+        const char *ctl_path = "/var/tmp/legacyrayd.sock";
         const char *config_path = "";
         int full_device = 0;
         parse_managed_args(argc, argv, &ctl_path, &config_path, &settings, &full_device);

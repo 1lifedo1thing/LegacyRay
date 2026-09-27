@@ -56,15 +56,15 @@ else
 fi
 
 echo "==> packaged offline assets"
-if [ -f "${ROOT}/senkotlsfix/cacert.pem" ]; then
-    n=$(grep -c 'BEGIN CERTIFICATE' "${ROOT}/senkotlsfix/cacert.pem" || true)
+if [ -f "${ROOT}/legacyraytlsfix/cacert.pem" ]; then
+    n=$(grep -c 'BEGIN CERTIFICATE' "${ROOT}/legacyraytlsfix/cacert.pem" || true)
     [ "${n}" -gt 100 ] || { echo "cacert.pem too small (${n} certs)" >&2; FAIL=1; }
     echo "[offline] cacert.pem ${n} certs"
 else
-    echo "missing senkotlsfix/cacert.pem" >&2
+    echo "missing legacyraytlsfix/cacert.pem" >&2
     FAIL=1
 fi
-for f in "${ROOT}/senkotlsfix/roots/"*.pem; do
+for f in "${ROOT}/legacyraytlsfix/roots/"*.pem; do
     [ -f "${f}" ] || continue
     openssl x509 -in "${f}" -noout -subject 2>/dev/null || { echo "bad pem ${f}" >&2; FAIL=1; }
     echo "[offline] $(basename "${f}") valid"

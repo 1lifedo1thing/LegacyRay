@@ -40,4 +40,8 @@ extern const transport_vt_t transport_reality;
 }
 #endif
 
+/* legacyray: set the "x.y.z" xray version sent in the reality session id;
+   -1 leaves the previous value when the text is not three numbers <= 255 */
+int reality_set_client_version(const char *text);
+
 #endif /* reality_handshake_h */

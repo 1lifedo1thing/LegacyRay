@@ -146,7 +146,7 @@ static int append_outbound(json_out_t *j, const vl_server_t *s,
                            const char *endpoint_ip) {
     const char *protocol;
     if (s->proto == VL_PROTO_VLESS) {
-        append_raw(j, "{\"tag\":\"senko-out\",\"protocol\":\"vless\",\"settings\":{\"address\":");
+        append_raw(j, "{\"tag\":\"legacyray-out\",\"protocol\":\"vless\",\"settings\":{\"address\":");
         append_string(j, endpoint_ip);
         append_format(j, ",\"port\":%u,\"id\":", (unsigned)s->port);
         append_string(j, s->uuid);
@@ -163,7 +163,7 @@ static int append_outbound(json_out_t *j, const vl_server_t *s,
     if (s->proto == VL_PROTO_HYSTERIA2) {
 /* the outbound settings only carry the destination: auth and the quic
    transport itself live in streamSettings.hysteriaSettings below */
-        append_raw(j, "{\"tag\":\"senko-out\",\"protocol\":\"hysteria\",\"settings\":{\"version\":2,\"address\":");
+        append_raw(j, "{\"tag\":\"legacyray-out\",\"protocol\":\"hysteria\",\"settings\":{\"version\":2,\"address\":");
         append_string(j, endpoint_ip);
         append_format(j, ",\"port\":%u}", (unsigned)s->port);
         append_raw(j, ",\"streamSettings\":{\"network\":\"hysteria\",\"security\":\"tls\",\"tlsSettings\":{\"serverName\":");
@@ -203,7 +203,7 @@ static int append_outbound(json_out_t *j, const vl_server_t *s,
     }
 
     if (s->proto == VL_PROTO_TROJAN) {
-        append_raw(j, "{\"tag\":\"senko-out\",\"protocol\":\"trojan\",\"settings\":{\"servers\":[{\"address\":");
+        append_raw(j, "{\"tag\":\"legacyray-out\",\"protocol\":\"trojan\",\"settings\":{\"servers\":[{\"address\":");
         append_string(j, endpoint_ip);
         append_format(j, ",\"port\":%u,\"password\":", (unsigned)s->port);
         append_string(j, s->pass);
@@ -214,7 +214,7 @@ static int append_outbound(json_out_t *j, const vl_server_t *s,
     }
 
     if (s->proto == VL_PROTO_SHADOWSOCKS) {
-        append_raw(j, "{\"tag\":\"senko-out\",\"protocol\":\"shadowsocks\",\"settings\":{\"servers\":[{\"address\":");
+        append_raw(j, "{\"tag\":\"legacyray-out\",\"protocol\":\"shadowsocks\",\"settings\":{\"servers\":[{\"address\":");
         append_string(j, endpoint_ip);
         append_format(j, ",\"port\":%u,\"method\":", (unsigned)s->port);
         append_string(j, s->encryption);
@@ -226,7 +226,7 @@ static int append_outbound(json_out_t *j, const vl_server_t *s,
     }
 
     protocol = (s->proto == VL_PROTO_SOCKS5) ? "socks" : "http";
-    append_raw(j, "{\"tag\":\"senko-out\",\"protocol\":");
+    append_raw(j, "{\"tag\":\"legacyray-out\",\"protocol\":");
     append_string(j, protocol);
     append_raw(j, ",\"settings\":{\"servers\":[{\"address\":");
     append_string(j, endpoint_ip);
@@ -254,14 +254,21 @@ static void append_routing_rule(json_out_t *j, const rule_t *rule, int *first) {
     append_raw(j, "{\"type\":\"field\",\"outboundTag\":");
     if (rule->action == RULE_ACTION_DIRECT) append_string(j, "direct");
     else if (rule->action == RULE_ACTION_BLOCK) append_string(j, "block");
-    else append_string(j, "senko-out");
+    else append_string(j, "legacyray-out");
     if (rule->type == RULE_TYPE_IP_CIDR) {
         append_raw(j, ",\"ip\":[");
         append_string(j, rule->value);
+    } else if (rule->type == RULE_TYPE_PORT) {
+        /* xray takes the port field as a plain string, not a list */
+        append_raw(j, ",\"port\":");
+        append_string(j, rule->value);
+        append_raw(j, "}");
+        return;
     } else {
         char domain[RULE_VALUE_MAX + 16];
         int n = snprintf(domain, sizeof domain, "%s%s",
-                         rule->type == RULE_TYPE_DOMAIN_SUFFIX ? "domain:" : "keyword:",
+                         rule->type == RULE_TYPE_DOMAIN_SUFFIX ? "domain:" :
+                         rule->type == RULE_TYPE_DOMAIN_FULL ? "full:" : "keyword:",
                          rule->value);
         if (n < 0 || (size_t)n >= sizeof domain) {
             j->failed = 1;
@@ -302,7 +309,7 @@ int go_config_render_rules(const vl_server_t *server, const char *endpoint_ip,
     j.len = 0;
     j.failed = 0;
     out[0] = '\0';
-    append_raw(&j, "{\"log\":{\"loglevel\":\"warning\"},\"inbounds\":[{\"tag\":\"senko-tun\",\"protocol\":\"tun\",\"settings\":{\"name\":");
+    append_raw(&j, "{\"log\":{\"loglevel\":\"warning\"},\"inbounds\":[{\"tag\":\"legacyray-tun\",\"protocol\":\"tun\",\"settings\":{\"name\":");
     append_string(&j, ifname);
     append_raw(&j, ",\"mtu\":1500},\"sniffing\":{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"],\"routeOnly\":true}}],\"outbounds\":[");
     if (append_outbound(&j, server, endpoint_ip) != 0) return -1;

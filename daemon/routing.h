@@ -12,7 +12,7 @@ extern "C" {
 /* reserve a stable rule range so cleanup cannot remove foreign rules */
 #define ROUTING_IPFW_BASE      12000
 #define ROUTING_IPFW_FWD       12020
-#define ROUTING_MAX_RULES      16
+#define ROUTING_MAX_RULES      32
 
 typedef enum {
     ROUTING_OK        =  0,
@@ -26,6 +26,12 @@ typedef struct {
     char rule_out[320];
     char rule_plain[320];
 } routing_ipfw_rule_t;
+
+/* legacyray: whether lan, link-local and cgnat ranges skip the tunnel, and
+   the ruleset whose port rules the firewall builders enforce (NULL for none).
+   set before a backend starts; the builders read it on every rebuild */
+void routing_set_policy(int bypass_lan, const ruleset_t *port_rules);
+int routing_policy_bypass_lan(void);
 
 routing_status_t routing_ipfw_rules(const char *server_ip,
                                     int redir_port, int socks_port,

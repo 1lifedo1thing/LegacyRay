@@ -137,6 +137,10 @@ ctl_status_t ctl_build_subinfo(int idx, uint64_t upload, uint64_t download,
                                uint64_t total, const char *description,
                                const char *support_url,
                                char *buf, size_t cap, size_t *n);
+/* legacyray: SUBEXTRA <idx> <update hours> <refill unix> <web page | -> */
+ctl_status_t ctl_build_subextra(int idx, uint32_t update_interval_h,
+                                uint64_t refill_date, const char *web_page_url,
+                                char *buf, size_t cap, size_t *n);
 ctl_status_t ctl_build_subhdr(int idx, const char *header,
                                char *buf, size_t cap, size_t *n);
 ctl_status_t ctl_build_link(int idx, const char *link, char *buf, size_t cap, size_t *n);

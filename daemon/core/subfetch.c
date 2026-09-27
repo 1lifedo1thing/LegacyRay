@@ -46,7 +46,7 @@ static int maybe_gunzip_body(uint8_t *buf, size_t *len, size_t cap) {
     memcpy(buf, out, out_len);
     *len = out_len;
     free(out);
-    fprintf(stderr, "senkod: subfetch gunzip %zu -> %zu\n", in_len, out_len);
+    fprintf(stderr, "legacyrayd: subfetch gunzip %zu -> %zu\n", in_len, out_len);
     return 0;
 }
 
@@ -158,6 +158,16 @@ static void parser_info(const http_parser_t *hp, subfetch_info_t *info) {
     if (hp->have_subscription_support_url)
         snprintf(info->support_url, sizeof info->support_url, "%s",
                  hp->subscription_support_url);
+    if (hp->have_web_page_url)
+        snprintf(info->web_page_url, sizeof info->web_page_url, "%s",
+                 hp->web_page_url);
+    if (hp->have_update_interval) info->update_interval_h = hp->update_interval_h;
+    if (hp->have_refill_date) info->refill_date = hp->refill_date;
+    /* legacyray: remnawave and marzban put their banner in announce; outside
+       of device gating it is the only prose a panel sends */
+    if (!hp->hwid_rejected && hp->have_announce && !info->description[0])
+        copy_metadata_text(hp->announce, info->description,
+                           sizeof info->description);
     if (hp->hwid_rejected) {
         info->gated = 1;
         if (hp->have_announce)

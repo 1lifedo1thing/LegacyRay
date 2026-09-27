@@ -103,7 +103,7 @@ static int tx_append(xh_t *h, const uint8_t *p, size_t n) {
 static int h2_fail(xh_t *h, const char *reason) {
     if (h->state == XH_ST_FAIL) return TRANSPORT_ERR;
     snprintf(h->last_err, sizeof h->last_err, "%s", reason);
-    fprintf(stderr, "senkod: http2: %s\n", reason);
+    fprintf(stderr, "legacyrayd: http2: %s\n", reason);
     h->state = XH_ST_FAIL;
     return TRANSPORT_ERR;
 }

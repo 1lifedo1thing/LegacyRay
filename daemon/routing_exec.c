@@ -28,13 +28,21 @@
 
 extern char **environ;
 
-#define PF_CONF "/var/run/senko-pf.conf"
-#define PF_ERR  "/var/tmp/senko-pf.err"
+#define PF_CONF "/var/run/legacyray-pf.conf"
+#define PF_ERR  "/var/tmp/legacyray-pf.err"
 #define PF_OS   SENKO_JBROOT "/etc/pf.os"
-#define PF_ANCHOR "com.apple/senko"
+#define PF_ANCHOR "com.apple/legacyray"
 #define PF_CONF_CAP (512u * 1024u)
 
 static dns_cache_t g_dns_cache;
+/* legacyray: what a name no rule matched gets. proxy keeps the stock
+   full-tunnel behaviour; direct turns the rules into a proxy allow-list */
+static rule_action_t g_default_action = RULE_ACTION_PROXY;
+
+void routing_exec_set_default_action(rule_action_t action) {
+    g_default_action = action == RULE_ACTION_DIRECT ? RULE_ACTION_DIRECT
+                                                    : RULE_ACTION_PROXY;
+}
 static pf_table_t g_pf_table;
 static uint32_t g_pf_cleanup_added[PF_TABLE_MAX_ADDRS];
 static uint32_t g_pf_cleanup_deleted[PF_TABLE_MAX_ADDRS];
@@ -269,7 +277,7 @@ static void ensure_pf_os_file(void) {
     int fd = open(PF_OS, O_WRONLY | O_CREAT | O_EXCL, 0644);
     if (fd < 0) {
         if (errno != EEXIST)
-            fprintf(stderr, "senkod: cannot create %s: %s\n", PF_OS, strerror(errno));
+            fprintf(stderr, "legacyrayd: cannot create %s: %s\n", PF_OS, strerror(errno));
         return;
     }
     static const char placeholder[] = "# senko does not use os fingerprints\n";
@@ -311,7 +319,7 @@ static int write_file(const char *path, const char *buf, size_t len) {
 static int pf_table_batch(const routing_exec_t *st, const char *operation,
                           const uint32_t *addresses, size_t count) {
     const char *pfctl;
-    char path[] = "/var/tmp/senko-pf-table.XXXXXX";
+    char path[] = "/var/tmp/legacyray-pf-table.XXXXXX";
     int fd;
     int rc = -1;
     if (!st || !operation || !addresses || count == 0 ||
@@ -347,11 +355,11 @@ static int pf_table_batch(const routing_exec_t *st, const char *operation,
     pid_t pid = 0;
 #if defined(SENKO_ROOTLESS)
     char *argv[] = { (char *)pfctl, (char *)"-q", (char *)"-a",
-                     (char *)PF_ANCHOR, (char *)"-t", (char *)"senko_bypass",
+                     (char *)PF_ANCHOR, (char *)"-t", (char *)"legacyray_bypass",
                      (char *)"-T", (char *)operation, (char *)"-f", (char *)"-", NULL };
 #else
     char *argv[] = { (char *)pfctl, (char *)"-q", (char *)"-t",
-                     (char *)"senko_bypass", (char *)"-T", (char *)operation,
+                     (char *)"legacyray_bypass", (char *)"-T", (char *)operation,
                      (char *)"-f", (char *)"-", NULL };
 #endif
     int spawn_rc = posix_spawn(&pid, pfctl, &actions, NULL, argv, environ);
@@ -760,7 +768,7 @@ static void dns_log_rule(routing_exec_t *st, size_t index,
     uint8_t bit = (uint8_t)(1u << (index % 8));
     if ((st->rule_logged[byte] & bit) != 0) return;
     st->rule_logged[byte] |= bit;
-    fprintf(stderr, "senkod: rule %s matched %s\n",
+    fprintf(stderr, "legacyrayd: rule %s matched %s\n",
             rule_action_name(action), question->name);
 }
 
@@ -769,11 +777,11 @@ static void pf_apply_changes(routing_exec_t *st,
                              const uint32_t *deleted, size_t deleted_count) {
     if (deleted_count && pf_table_batch(st, "delete", deleted, deleted_count) != 0) {
         pf_table_mark_installed(&g_pf_table, deleted, deleted_count, 1);
-        fprintf(stderr, "senkod: pf bypass batch delete failed\n");
+        fprintf(stderr, "legacyrayd: pf bypass batch delete failed\n");
     }
     if (added_count && pf_table_batch(st, "add", added, added_count) != 0) {
         pf_table_mark_installed(&g_pf_table, added, added_count, 0);
-        fprintf(stderr, "senkod: pf bypass batch add failed\n");
+        fprintf(stderr, "legacyrayd: pf bypass batch add failed\n");
     }
 }
 
@@ -787,7 +795,7 @@ static void dns_update_pf(routing_exec_t *st, const dns_question_t *question,
     if (pf_table_record(&g_pf_table, question->name, action,
                         info->ipv4, info->ipv4_count, now, info->min_ttl,
                         &changes) != PF_TABLE_OK) {
-        fprintf(stderr, "senkod: pf bypass shadow is full\n");
+        fprintf(stderr, "legacyrayd: pf bypass shadow is full\n");
         return;
     }
     pf_apply_changes(st, changes.added, changes.added_count,
@@ -801,7 +809,7 @@ static void dns_cleanup_pf(routing_exec_t *st, uint64_t now) {
     if (pf_table_cleanup(&g_pf_table, now,
                          g_pf_cleanup_added, PF_TABLE_MAX_ADDRS, &added_count,
                          g_pf_cleanup_deleted, PF_TABLE_MAX_ADDRS, &deleted_count) != PF_TABLE_OK) {
-        fprintf(stderr, "senkod: pf bypass cleanup overflowed\n");
+        fprintf(stderr, "legacyrayd: pf bypass cleanup overflowed\n");
         return;
     }
     pf_apply_changes(st, g_pf_cleanup_added, added_count,
@@ -833,7 +841,7 @@ static void *dns_forwarder_thread(void *arg) {
         if (st->flush_dns_requested) {
             st->flush_dns_requested = 0;
             dns_cache_clear(&g_dns_cache);
-            fprintf(stderr, "senkod: dns cache flushed on request\n");
+            fprintf(stderr, "legacyrayd: dns cache flushed on request\n");
         }
         if (st->flush_bypass_requested) {
             st->flush_bypass_requested = 0;
@@ -844,7 +852,7 @@ static void *dns_forwarder_thread(void *arg) {
             if (installed)
                 (void)pf_table_batch(st, "delete", g_pf_cleanup_deleted, installed);
             pf_table_clear(&g_pf_table);
-            fprintf(stderr, "senkod: bypass table flushed on request (%zu address(es))\n",
+            fprintf(stderr, "legacyrayd: bypass table flushed on request (%zu address(es))\n",
                     installed);
         }
         if (now >= next_cleanup) {
@@ -859,20 +867,21 @@ static void *dns_forwarder_thread(void *arg) {
         if (query_len <= 0) {
             if (query_len < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
                 errno != EINTR)
-                fprintf(stderr, "senkod: DNS proxy recvfrom error: %s\n",
+                fprintf(stderr, "legacyrayd: DNS proxy recvfrom error: %s\n",
                         strerror(errno));
             continue;
         }
 
         dns_question_t question;
         if (dns_msg_parse_question(query, (size_t)query_len, &question) != DNS_MSG_OK) {
-            fprintf(stderr, "senkod: DNS proxy rejected malformed query\n");
+            fprintf(stderr, "legacyrayd: DNS proxy rejected malformed query\n");
             continue;
         }
         size_t matched = SIZE_MAX;
         rule_action_t action = st->rules
             ? ruleset_match_domain(st->rules, question.name, &matched)
             : RULE_ACTION_PROXY;
+        if (st->rules && matched == SIZE_MAX) action = g_default_action;
         if (matched != SIZE_MAX) dns_log_rule(st, matched, &question, action);
 
         size_t response_len = 0;
@@ -912,7 +921,7 @@ static void *dns_forwarder_thread(void *arg) {
                 dns_msg_clamp_ttls(response, response_len,
                                    DNS_CACHE_TTL_MIN, DNS_CACHE_TTL_MAX) != DNS_MSG_OK ||
                 dns_msg_response_info(response, response_len, &info) != DNS_MSG_OK) {
-                fprintf(stderr, "senkod: DNS proxy rejected malformed response\n");
+                fprintf(stderr, "legacyrayd: DNS proxy rejected malformed response\n");
                 close(tcp_fd);
                 tcp_fd = -1;
                 continue;
@@ -939,7 +948,7 @@ static void *dns_forwarder_thread(void *arg) {
                 (void)dns_sendto(udp_fd, response, response_len,
                                  &client_address, client_len);
             } else {
-                fprintf(stderr, "senkod: DNS proxy failed to forward query\n");
+                fprintf(stderr, "legacyrayd: DNS proxy failed to forward query\n");
             }
         }
     }
@@ -994,7 +1003,7 @@ rexec_status_t routing_exec_up(routing_exec_t *st, int socks_port,
     st->dns_fd = dns_fd;
     st->dns_bound = 1;
     if (dns_port != dns_local_port)
-        fprintf(stderr, "senkod: dns port %d busy, using %d\n",
+        fprintf(stderr, "legacyrayd: dns port %d busy, using %d\n",
                 dns_local_port, dns_port);
     snprintf(st->dns_upstream, sizeof st->dns_upstream, "%s", dns_upstream);
     snprintf(st->server_ip, sizeof st->server_ip, "%s", server_ip);
@@ -1003,7 +1012,7 @@ rexec_status_t routing_exec_up(routing_exec_t *st, int socks_port,
     /* both backends redirect into Senko's transparent listener */
     int redir = routing_pick_free_port(0, 0);
     if (redir <= 0) {
-        fprintf(stderr, "senkod: no free redirect port\n");
+        fprintf(stderr, "legacyrayd: no free redirect port\n");
         routing_exec_down(st);
         return REXEC_ERR_PORT;
     }
@@ -1013,12 +1022,12 @@ rexec_status_t routing_exec_up(routing_exec_t *st, int socks_port,
         char ifnames[ROUTING_MAX_IFS][32];
         size_t if_count = collect_ifaces(ifnames, ROUTING_MAX_IFS);
         if (if_count == 0)
-            fprintf(stderr, "senkod: pfctl found but no IPv4 en*/pdp_ip* interface\n");
+            fprintf(stderr, "legacyrayd: pfctl found but no IPv4 en*/pdp_ip* interface\n");
         if (if_count > 0) {
-            fprintf(stderr, "senkod: pf trying %zu interface(s):", if_count);
+            fprintf(stderr, "legacyrayd: pf trying %zu interface(s):", if_count);
             for (size_t i = 0; i < if_count; ++i) fprintf(stderr, " %s", ifnames[i]);
             fprintf(stderr, "\n");
-            char pf_detail[192];
+            char pf_detail[192] = "";
             int last_pf_mode = -1;
 /* a pinned variant runs alone: a tester who cannot stop the ladder after the
    first rejection cannot tell whether the rung they care about works */
@@ -1027,7 +1036,7 @@ rexec_status_t routing_exec_up(routing_exec_t *st, int socks_port,
             if (force_pf_mode >= 0 && force_pf_mode < ROUTING_PF_MODE_COUNT) {
                 first_mode = force_pf_mode;
                 mode_count = force_pf_mode + 1;
-                fprintf(stderr, "senkod: pf mode pinned to %s\n",
+                fprintf(stderr, "legacyrayd: pf mode pinned to %s\n",
                         routing_pf_mode_name((routing_pf_mode_t)force_pf_mode));
             }
             for (int m = first_mode; m < mode_count; ++m) {
@@ -1048,7 +1057,7 @@ rexec_status_t routing_exec_up(routing_exec_t *st, int socks_port,
                     st->pf_mode = (routing_pf_mode_t)m;
                     st->pf_mode_valid = 1;
                     st->pf_rejected = m - first_mode;
-                    fprintf(stderr, "senkod: pf mode %s accepted after %d rejected\n",
+                    fprintf(stderr, "legacyrayd: pf mode %s accepted after %d rejected\n",
                             routing_pf_mode_name((routing_pf_mode_t)m),
                             st->pf_rejected);
                     if (start_dns_forwarder(st) != 0) {
@@ -1058,13 +1067,13 @@ rexec_status_t routing_exec_up(routing_exec_t *st, int socks_port,
                     return REXEC_OK;
                 }
             }
-            fprintf(stderr, "senkod: %s pf rule mode(s) rejected (last mode %d: %s)\n",
+            fprintf(stderr, "legacyrayd: %s pf rule mode(s) rejected (last mode %d: %s)\n",
                     mode_count - first_mode == 1 ? "the pinned" : "all",
                     last_pf_mode, pf_detail[0] ? pf_detail : "unknown pfctl error");
             clear_pf();
         }
     } else {
-        fprintf(stderr, "senkod: pfctl not found\n");
+        fprintf(stderr, "legacyrayd: pfctl not found\n");
     }
 
     const char *ipfw = routing_find_ipfw();
@@ -1075,7 +1084,7 @@ rexec_status_t routing_exec_up(routing_exec_t *st, int socks_port,
             st->redir_port = redir;
             if (routing_scopedroute_disable(st->scoped_route_prev,
                                             sizeof st->scoped_route_prev) != 0)
-                fprintf(stderr, "senkod: scopedroute tweak failed, "
+                fprintf(stderr, "legacyrayd: scopedroute tweak failed, "
                                 "ipfw fwd may not reach the listener\n");
             if (start_dns_forwarder(st) != 0) {
                 routing_exec_down(st);
@@ -1083,13 +1092,13 @@ rexec_status_t routing_exec_up(routing_exec_t *st, int socks_port,
             }
             return REXEC_OK;
         }
-        fprintf(stderr, "senkod: ipfw rules rejected\n");
+        fprintf(stderr, "legacyrayd: ipfw rules rejected\n");
         clear_ipfw();
     } else {
-        fprintf(stderr, "senkod: ipfw not found in known paths or PATH\n");
+        fprintf(stderr, "legacyrayd: ipfw not found in known paths or PATH\n");
     }
 
-    fprintf(stderr, "senkod: no routing backend (need pfctl+ifaces or ipfw); "
+    fprintf(stderr, "legacyrayd: no routing backend (need pfctl+ifaces or ipfw); "
             "full-device will not redirect\n");
     routing_exec_down(st);
     return REXEC_ERR_NO_BACKEND;
@@ -1190,7 +1199,7 @@ void routing_exec_bypass_add_ipv4(routing_exec_t *st, const char *ip) {
         if (!pfctl) return;
         char addr[64];
         snprintf(addr, sizeof addr, "%s/32", ip);
-        char *argv[] = { (char *)pfctl, (char *)"-t", (char *)"senko_bypass",
+        char *argv[] = { (char *)pfctl, (char *)"-t", (char *)"legacyray_bypass",
                          (char *)"-T", (char *)"add", addr, NULL };
         (void)run_spawn_quiet(pfctl, argv);
         return;

@@ -7,7 +7,7 @@
 #include <openssl/err.h>
 #include "../../common/senko_paths.h"
 
-#define SENKO_CA_BUNDLE SENKO_USR_LIB "/senkotlsfix/cacert.pem"
+#define SENKO_CA_BUNDLE SENKO_USR_LIB "/legacyraytlsfix/cacert.pem"
 
 typedef struct {
     SSL_CTX *ctx;

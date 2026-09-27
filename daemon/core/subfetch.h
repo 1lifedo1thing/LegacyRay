@@ -50,6 +50,10 @@ typedef struct {
    of the real node list; gate_reason carries the panel's own wording */
     int  gated;
     char gate_reason[256];
+/* legacyray */
+    char     web_page_url[512];
+    uint32_t update_interval_h;
+    uint64_t refill_date;
 } subfetch_info_t;
 
 subfetch_status_t subfetch_get(const subfetch_cfg_t *cfg, const char *url,

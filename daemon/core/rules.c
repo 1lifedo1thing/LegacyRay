@@ -15,6 +15,8 @@ const char *rule_type_name(rule_type_t type) {
     if (type == RULE_TYPE_DOMAIN_SUFFIX) return "domain-suffix";
     if (type == RULE_TYPE_DOMAIN_KEYWORD) return "domain-keyword";
     if (type == RULE_TYPE_IP_CIDR) return "ip-cidr";
+    if (type == RULE_TYPE_DOMAIN_FULL) return "domain";
+    if (type == RULE_TYPE_PORT) return "port";
     return NULL;
 }
 
@@ -49,6 +51,10 @@ static int parse_type(const char *text, size_t len, rule_type_t *out) {
         *out = RULE_TYPE_DOMAIN_KEYWORD;
     else if (len == 7 && memcmp(text, "ip-cidr", 7) == 0)
         *out = RULE_TYPE_IP_CIDR;
+    else if (len == 6 && memcmp(text, "domain", 6) == 0)
+        *out = RULE_TYPE_DOMAIN_FULL;
+    else if (len == 4 && memcmp(text, "port", 4) == 0)
+        *out = RULE_TYPE_PORT;
     else return -1;
     return 0;
 }
@@ -116,6 +122,44 @@ static int parse_cidr(rule_t *rule, const char *text, size_t len) {
     return n > 0 && (size_t)n < sizeof rule->value ? 0 : -1;
 }
 
+/* "443" or "8000-8999"; the canonical text drops leading zeros so two
+   spellings of one range are one rule */
+static int parse_port_range(rule_t *rule, const char *text, size_t len) {
+    unsigned long lo = 0, hi = 0;
+    size_t i = 0;
+    int digits = 0;
+    if (len == 0 || len > 11) return -1;
+    while (i < len && text[i] >= '0' && text[i] <= '9') {
+        lo = lo * 10ul + (unsigned long)(text[i++] - '0');
+        if (lo > 65535ul) return -1;
+        digits = 1;
+    }
+    if (!digits) return -1;
+    hi = lo;
+    if (i < len) {
+        if (text[i++] != '-') return -1;
+        hi = 0;
+        digits = 0;
+        while (i < len && text[i] >= '0' && text[i] <= '9') {
+            hi = hi * 10ul + (unsigned long)(text[i++] - '0');
+            if (hi > 65535ul) return -1;
+            digits = 1;
+        }
+        if (!digits || i != len) return -1;
+    }
+    if (lo == 0 || hi < lo) return -1;
+    rule->port_lo = (uint16_t)lo;
+    rule->port_hi = (uint16_t)hi;
+    int n = lo == hi
+        ? snprintf(rule->value, sizeof rule->value, "%lu", lo)
+        : snprintf(rule->value, sizeof rule->value, "%lu-%lu", lo, hi);
+    return n > 0 && (size_t)n < sizeof rule->value ? 0 : -1;
+}
+
+int rule_is_port(const rule_t *rule) {
+    return rule && rule->type == RULE_TYPE_PORT;
+}
+
 rules_status_t rules_parse(const char *text, size_t len, rule_t *out) {
     if (!text || !out) return RULES_ERR_ARG;
     memset(out, 0, sizeof *out);
@@ -135,6 +179,8 @@ rules_status_t rules_parse(const char *text, size_t len, rule_t *out) {
     if (value_len == 0 || memchr(value, ' ', value_len)) return RULES_ERR_VALUE;
     if (out->type == RULE_TYPE_IP_CIDR) {
         if (parse_cidr(out, value, value_len) != 0) return RULES_ERR_VALUE;
+    } else if (out->type == RULE_TYPE_PORT) {
+        if (parse_port_range(out, value, value_len) != 0) return RULES_ERR_VALUE;
     } else if (normalize_domain(value, value_len, out->value,
                                 sizeof out->value) != 0) {
         return RULES_ERR_VALUE;
@@ -154,6 +200,12 @@ rules_status_t ruleset_add(ruleset_t *rules, const rule_t *rule, size_t *out_ind
         return RULES_OK;
     }
     if (rules->count >= RULESET_MAX_RULES) return RULES_ERR_FULL;
+    if (rule->type == RULE_TYPE_PORT) {
+        size_t ports = 0;
+        for (size_t i = 0; i < rules->count; ++i)
+            if (rules->entries[i].type == RULE_TYPE_PORT) ++ports;
+        if (ports >= RULESET_MAX_PORT_RULES) return RULES_ERR_FULL;
+    }
     rules->entries[rules->count] = *rule;
     rules->entries[rules->count].hits = 0;
     if (out_index) *out_index = rules->count;
@@ -201,7 +253,9 @@ rule_action_t ruleset_match_domain(ruleset_t *rules, const char *domain,
         int match = rule->type == RULE_TYPE_DOMAIN_SUFFIX
             ? suffix_matches(normalized, rule->value)
             : rule->type == RULE_TYPE_DOMAIN_KEYWORD
-                ? strstr(normalized, rule->value) != NULL : 0;
+                ? strstr(normalized, rule->value) != NULL
+                : rule->type == RULE_TYPE_DOMAIN_FULL
+                    ? strcmp(normalized, rule->value) == 0 : 0;
         int rank = action_rank(rule->action);
         if (match && rank > best_rank) {
             best_rank = rank;

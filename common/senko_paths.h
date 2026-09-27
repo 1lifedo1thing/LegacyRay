@@ -16,19 +16,19 @@
 /* the device id panels bind a subscription to. it stays outside the jailbreak
    root so the daemon and the ui, which run as different users, agree on one
    value and a jailbreak change does not hand the panel a new device */
-#define SENKO_HWID_PATH "/var/mobile/Library/Preferences/com.senko.hwid"
+#define SENKO_HWID_PATH "/var/mobile/Library/Preferences/com.legacyray.hwid"
 
 /* launchd redirects both daemon streams here, and the ui reads the same file */
-#define SENKO_SYSTEM_LOG "/var/log/senko-system.log"
+#define SENKO_SYSTEM_LOG "/var/log/legacyray-system.log"
 
 /* the ui stages pasted or picked content here and the daemon consumes it. a
    fixed path keeps the privileged reader free of any caller supplied path */
-#define SENKO_IMPORT_STAGE "/var/mobile/Library/Preferences/Senko/import.dat"
+#define SENKO_IMPORT_STAGE "/var/mobile/Library/Preferences/LegacyRay/import.dat"
 
 /* a launch that dies before the first frame leaves nothing a user can reach,
    because the only reader of the report used to be the app that will not
-   start. these paths are fixed so senkoctl can print them over ssh instead */
-#define SENKO_CRASH_DIR    "/var/mobile/Library/Preferences/Senko"
+   start. these paths are fixed so legacyrayctl can print them over ssh instead */
+#define SENKO_CRASH_DIR    "/var/mobile/Library/Preferences/LegacyRay"
 #define SENKO_CRASH_LAST   SENKO_CRASH_DIR "/last-crash.log"
 #define SENKO_CRASH_PREV   SENKO_CRASH_DIR "/previous-crash.log"
 #define SENKO_CRASH_STAGE  SENKO_CRASH_DIR "/launch-stage.log"

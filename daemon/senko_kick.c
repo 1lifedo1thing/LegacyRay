@@ -21,33 +21,33 @@
 
 extern char **environ;
 
-#define PLIST  SENKO_LAUNCH_DAEMONS "/com.senko.senkod.plist"
-#define SOCK   "/var/tmp/senkod.sock"
-#define BIN    SENKO_USR_BIN "/senkod"
-#define CFG    "/var/root/Library/Preferences/senko.cfg"
-#define KLOG   "/var/log/senko-kick.log"
+#define PLIST  SENKO_LAUNCH_DAEMONS "/com.legacyray.daemon.plist"
+#define SOCK   "/var/tmp/legacyrayd.sock"
+#define BIN    SENKO_USR_BIN "/legacyrayd"
+#define CFG    "/var/root/Library/Preferences/legacyray.cfg"
+#define KLOG   "/var/log/legacyray-kick.log"
 /* /var/log is root:wheel 755: unwritable by the mobile process this binary
    still is whenever the very thing it needs to report is that it never
    became root. this path sits in the same directory the app crash report
    already uses, so it is writable in exactly that failure case. */
 #define KLOG_FALLBACK SENKO_CRASH_DIR "/kick.log"
-#define LABEL  "com.senko.senkod"
-#define AWG_BIN SENKO_USR_BIN "/senkoawgd"
-#define CTL_BIN SENKO_USR_BIN "/senkoctl"
-#define AWG_PID "/var/run/senkoawgd.pid"
+#define LABEL  "com.legacyray.daemon"
+#define AWG_BIN SENKO_USR_BIN "/legacyrayawgd"
+#define CTL_BIN SENKO_USR_BIN "/legacyrayctl"
+#define AWG_PID "/var/run/legacyrayawgd.pid"
 #define SYSTEM_LOG SENKO_SYSTEM_LOG
 #define AWG_LOG SYSTEM_LOG
-#define AWG_STATUS "/var/run/senkoawgd.status"
-#define AWG_ACTIVE_CONFIG "/var/run/senkoawgd.config"
-#define AWG_CONFIG_DIR "/var/mobile/Library/Preferences/Senko/"
-#define STATUS_STATE "/var/mobile/Library/Preferences/com.senko.status.state"
+#define AWG_STATUS "/var/run/legacyrayawgd.status"
+#define AWG_ACTIVE_CONFIG "/var/run/legacyrayawgd.config"
+#define AWG_CONFIG_DIR "/var/mobile/Library/Preferences/LegacyRay/"
+#define STATUS_STATE "/var/mobile/Library/Preferences/com.legacyray.status.state"
 /* /tmp is readable by the mobile ui */
-#define UPDATE_LOG "/tmp/senko-update.log"
+#define UPDATE_LOG "/tmp/legacyray-update.log"
 #define UPDATE_MAX_BYTES (64 * 1024 * 1024)
-#define UPDATE_AWG_MARKER "/var/run/senkoawgd.upgrade"
-#define KICK_LOCK "/var/tmp/senko-kick.lock"
+#define UPDATE_AWG_MARKER "/var/run/legacyrayawgd.upgrade"
+#define KICK_LOCK "/var/tmp/legacyray-kick.lock"
 #define KICK_LOCK_WAIT_MS 30000
-/* one ensure_senkod pass can hold the lock through two launchd and two direct
+/* one ensure_legacyrayd pass can hold the lock through two launchd and two direct
    attempts. a concurrent caller waits long enough to observe that result
    instead of surfacing a false lock failure on ios 13 */
 #define KICK_CONCURRENT_WAIT_TENTHS 600
@@ -60,8 +60,8 @@ extern char **environ;
 static const char *senko_daemon_path(void) {
     static const char *path;
     static const char *candidates[] = {
-        SENKO_USR_BIN "/senkod", "/usr/bin/senkod",
-        "/var/jb/usr/bin/senkod", NULL
+        SENKO_USR_BIN "/legacyrayd", "/usr/bin/legacyrayd",
+        "/var/jb/usr/bin/legacyrayd", NULL
     };
     if (path) return path;
     for (int i = 0; candidates[i]; ++i) {
@@ -76,9 +76,9 @@ static const char *senko_daemon_path(void) {
 static const char *senko_daemon_plist(void) {
     static const char *path;
     static const char *candidates[] = {
-        SENKO_LAUNCH_DAEMONS "/com.senko.senkod.plist",
-        "/Library/LaunchDaemons/com.senko.senkod.plist",
-        "/var/jb/Library/LaunchDaemons/com.senko.senkod.plist", NULL
+        SENKO_LAUNCH_DAEMONS "/com.legacyray.daemon.plist",
+        "/Library/LaunchDaemons/com.legacyray.daemon.plist",
+        "/var/jb/Library/LaunchDaemons/com.legacyray.daemon.plist", NULL
     };
     if (path) return path;
     for (int i = 0; candidates[i]; ++i) {
@@ -109,12 +109,12 @@ static void klog(const char *msg) {
         fd = open(KLOG_FALLBACK, O_WRONLY | O_CREAT | O_APPEND, 0644);
     }
     if (fd >= 0) {
-        dprintf(fd, "senko-kick: %s\n", msg);
+        dprintf(fd, "legacyray-kick: %s\n", msg);
         close(fd);
     }
     /* keep a copy on stderr when launched from a console, regardless of
        whether either log file could be opened */
-    fprintf(stderr, "senko-kick: %s\n", msg);
+    fprintf(stderr, "legacyray-kick: %s\n", msg);
 }
 
 static long elapsed_ms(const struct timeval *start, const struct timeval *end) {
@@ -278,7 +278,7 @@ static int update_path_ok(const char *path) {
 
 static int update_stage_copy(const char *src, char *dst, size_t dstcap) {
     if (!src || !dst || dstcap < 40) return -1;
-    char tmpl[] = "/tmp/senko-update-XXXXXX";
+    char tmpl[] = "/tmp/legacyray-update-XXXXXX";
     int out = mkstemp(tmpl);
     if (out < 0) return -1;
     int in = open(src, O_RDONLY);
@@ -326,7 +326,7 @@ static int update_stage_copy(const char *src, char *dst, size_t dstcap) {
 }
 
 /* the control socket answers an unauthenticated STATUS with the auth challenge,
-   and only senkod speaks that. checking for the state line alone meant every
+   and only legacyrayd speaks that. checking for the state line alone meant every
    probe failed once the control token landed: the helper then killed a healthy
    daemon, spent its whole repair budget, and reported a start failure while the
    daemon it killed had been answering the app all along */
@@ -390,8 +390,8 @@ static int wait_sock_down(int tenths) {
     return sock_alive() ? -1 : 0;
 }
 
-/* start senkod without launchd */
-static int spawn_senkod_direct(void) {
+/* start legacyrayd without launchd */
+static int spawn_legacyrayd_direct(void) {
     const char *bin = senko_daemon_path();
     char *argv[] = {
         (char *)bin,
@@ -440,28 +440,28 @@ static int spawn_senkod_direct(void) {
     return 0;
 }
 
-static void kill_senkod(void) {
+static void kill_legacyrayd(void) {
     static const char *kills[] = { SENKO_USR_BIN "/killall", "/usr/bin/killall", "/bin/killall", NULL };
     char killbin[64];
     if (find_bin(kills, killbin, sizeof killbin) != 0) return;
-    char *argv[] = { killbin, (char *)"-9", (char *)"senkod", NULL };
+    char *argv[] = { killbin, (char *)"-9", (char *)"legacyrayd", NULL };
     (void)run_argv(argv);
 }
 
-static int senkod_alive(void) {
+static int legacyrayd_alive(void) {
     static const char *kills[] = { SENKO_USR_BIN "/killall", "/usr/bin/killall", "/bin/killall", NULL };
     char killbin[64], output[32];
     if (find_bin(kills, killbin, sizeof killbin) != 0) return 0;
-    char *argv[] = { killbin, (char *)"-0", (char *)"senkod", NULL };
+    char *argv[] = { killbin, (char *)"-0", (char *)"legacyrayd", NULL };
     return run_capture_text(argv, output, sizeof output) == 0;
 }
 
-static int wait_senkod_down(int tenths) {
+static int wait_legacyrayd_down(int tenths) {
     for (int i = 0; i < tenths; ++i) {
-        if (!senkod_alive()) return 0;
+        if (!legacyrayd_alive()) return 0;
         usleep(100000);
     }
-    return senkod_alive() ? -1 : 0;
+    return legacyrayd_alive() ? -1 : 0;
 }
 
 static int launch_job_loaded(const char *launchctl) {
@@ -477,8 +477,8 @@ static int launch_job_stop(const char *launchctl) {
     (void)run_argv(unload);
     (void)run_argv(remove);
     if (launch_job_loaded(launchctl)) return -1;
-    kill_senkod();
-    (void)wait_senkod_down(30);
+    kill_legacyrayd();
+    (void)wait_legacyrayd_down(30);
     (void)wait_sock_down(30);
     unlink(SOCK);
     return 0;
@@ -569,7 +569,7 @@ static int awg_stop_unlocked(void) {
         return 0;
     }
     if (awg_read_pid(&pid) != 0 || kill(pid, 0) != 0) {
-        (void)kill_named("senkoawgd", SIGTERM);
+        (void)kill_named("legacyrayawgd", SIGTERM);
         unlink(AWG_PID);
         unlink(AWG_ACTIVE_CONFIG);
         awg_write_status("idle");
@@ -578,7 +578,7 @@ static int awg_stop_unlocked(void) {
         return 0;
     }
     if (kill(pid, SIGTERM) != 0) {
-        (void)kill_named("senkoawgd", SIGTERM);
+        (void)kill_named("legacyrayawgd", SIGTERM);
         unlink(AWG_PID);
         unlink(AWG_ACTIVE_CONFIG);
         awg_write_status("idle");
@@ -588,7 +588,7 @@ static int awg_stop_unlocked(void) {
     }
     for (int i = 0; i < 50 && kill(pid, 0) == 0; ++i) usleep(100000);
     if (kill(pid, 0) == 0) {
-        (void)kill_named("senkoawgd", SIGTERM);
+        (void)kill_named("legacyrayawgd", SIGTERM);
         for (int i = 0; i < 20 && kill(pid, 0) == 0; ++i) usleep(100000);
     }
     if (kill(pid, SIGKILL) == 0 || errno == ESRCH) {
@@ -608,7 +608,7 @@ static int awg_stop(void) {
     if (rc == 0) return 0;
 /* last resort: the process may be gone while the kill() checks raced a
  * zombie entry; sweep by name and treat a missing process as stopped */
-    (void)kill_named("senkoawgd", SIGKILL);
+    (void)kill_named("legacyrayawgd", SIGKILL);
     usleep(300000);
     unlink(AWG_PID);
     unlink(AWG_ACTIVE_CONFIG);
@@ -699,7 +699,7 @@ static void restore_awg_upgrade_state(void) {
     (void)awg_start(path);
 }
 
-static void stop_senkod_for_update(void) {
+static void stop_legacyrayd_for_update(void) {
     char launchctl[64];
     static const char *launchctl_paths[] = {
         SENKO_JBROOT "/bin/launchctl", SENKO_USR_BIN "/launchctl",
@@ -713,18 +713,18 @@ static void stop_senkod_for_update(void) {
         char *remove[] = { launchctl, (char *)"remove", (char *)LABEL, NULL };
         (void)run_argv(remove);
     }
-    (void)kill_named("senkod", SIGTERM);
+    (void)kill_named("legacyrayd", SIGTERM);
     usleep(700000);
-    kill_senkod();
-    (void)wait_senkod_down(30);
+    kill_legacyrayd();
+    (void)wait_legacyrayd_down(30);
     (void)wait_sock_down(30);
     unlink(SOCK);
 }
 
-static int ensure_senkod(void);
+static int ensure_legacyrayd(void);
 
-static int restart_senkod_after_update(void) {
-    return ensure_senkod();
+static int restart_legacyrayd_after_update(void) {
+    return ensure_legacyrayd();
 }
 
 static void update_stage(const char *name) {
@@ -774,9 +774,9 @@ static int update_package(const char *path) {
     char *field_argv[] = { dpkg_deb, (char *)"-f", (char *)pkg_path,
                            (char *)"Package", NULL };
     if (run_capture_text(field_argv, package, sizeof package) != 0 ||
-        strcmp(package, "com.senko.daemon") != 0) {
+        strcmp(package, "com.legacyray.app") != 0) {
         unlink(staged);
-        fputs("UPDATE ERR package is not Senko\n", stdout);
+        fputs("UPDATE ERR package is not LegacyRay\n", stdout);
         return 1;
     }
 
@@ -805,7 +805,7 @@ static int update_package(const char *path) {
 
     save_awg_upgrade_state();
     update_stage("stopping daemon");
-    stop_senkod_for_update();
+    stop_legacyrayd_for_update();
 
     char dpkg[64];
     static const char *dpkg_paths[] = {
@@ -815,7 +815,7 @@ static int update_package(const char *path) {
     if (find_bin(dpkg_paths, dpkg, sizeof dpkg) != 0) {
         unlink(staged);
         restore_awg_upgrade_state();
-        (void)restart_senkod_after_update();
+        (void)restart_legacyrayd_after_update();
         fputs("UPDATE ERR dpkg missing\n", stdout);
         return 1;
     }
@@ -825,7 +825,7 @@ static int update_package(const char *path) {
     int rc = run_logged_timeout(install_argv, DPKG_TIMEOUT_MS);
     unlink(staged);
     update_stage("starting daemon");
-    int daemon_rc = restart_senkod_after_update();
+    int daemon_rc = restart_legacyrayd_after_update();
     if (access(UPDATE_AWG_MARKER, F_OK) == 0)
         restore_awg_upgrade_state();
     if (rc == 124) {
@@ -865,7 +865,7 @@ static int awg_validate(const char *config) {
 }
 
 /* repair launchd, then fall back to a direct start */
-static int ensure_senkod(void) {
+static int ensure_legacyrayd(void) {
     if (sock_alive()) {
         klog("already up");
         return 0;
@@ -890,7 +890,7 @@ static int ensure_senkod(void) {
 
     const char *bin = senko_daemon_path();
     if (access(bin, X_OK) != 0) {
-        klog("senkod missing");
+        klog("legacyrayd missing");
         return 2;
     }
 
@@ -922,17 +922,17 @@ static int ensure_senkod(void) {
             klog("no launchctl/plist, direct spawn");
         }
 
-        kill_senkod();
-        (void)wait_senkod_down(60);
+        kill_legacyrayd();
+        (void)wait_legacyrayd_down(60);
         (void)wait_sock_down(60);
         unlink(SOCK);
-        if (spawn_senkod_direct() == 0 && wait_sock(120) == 0) {
+        if (spawn_legacyrayd_direct() == 0 && wait_sock(120) == 0) {
             klog("up via direct spawn");
             return 0;
         }
 
         klog(attempt == 0 ? "direct start failed, retrying" :
-             "senkod did not open sock");
+             "legacyrayd did not open sock");
     }
 
     return 5;
@@ -945,8 +945,8 @@ static int ensure_senkod(void) {
 static const char *senko_kick_self_path(void) {
     static const char *path;
     static const char *candidates[] = {
-        SENKO_USR_BIN "/senko-kick", "/var/jb/usr/bin/senko-kick",
-        "/usr/bin/senko-kick", "/bin/senko-kick", NULL
+        SENKO_USR_BIN "/legacyray-kick", "/var/jb/usr/bin/legacyray-kick",
+        "/usr/bin/legacyray-kick", "/bin/legacyray-kick", NULL
     };
     if (path) return path;
     for (int i = 0; candidates[i]; ++i) {
@@ -984,7 +984,7 @@ static void klog_setuid_failure(void) {
         snprintf(msg, sizeof msg,
                  "need root: uid=%d euid=%d, and %s could not be found to "
                  "check its permissions",
-                 (int)getuid(), (int)geteuid(), self ? self : "senko-kick");
+                 (int)getuid(), (int)geteuid(), self ? self : "legacyray-kick");
     }
     klog(msg);
 }
@@ -1009,7 +1009,7 @@ int main(int argc, char **argv) {
             if (rc != 0) fputs("error amneziawg stop timeout\n", stdout);
             return rc == 0 ? 0 : 1;
         }
-/* another senko-kick holds the lock, which means a start is already running.
+/* another legacyray-kick holds the lock, which means a start is already running.
    its result is the answer, so wait for the socket instead of reporting a
    failure the app then shows as "daemon start failed" */
         if (argc == 1 && wait_sock(KICK_CONCURRENT_WAIT_TENTHS) == 0) {
@@ -1032,5 +1032,5 @@ int main(int argc, char **argv) {
         return awg_validate(argv[2]) == 0 ? 0 : 1;
     if (argc == 3 && strcmp(argv[1], "--awg-probe") == 0) return awg_probe(argv[2]) == 0 ? 0 : 1;
     if (argc == 3 && strcmp(argv[1], "--update") == 0) return update_package(argv[2]);
-    return ensure_senkod();
+    return ensure_legacyrayd();
 }

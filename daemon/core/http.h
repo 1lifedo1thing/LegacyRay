@@ -80,6 +80,14 @@ typedef struct {
     char    announce[512];
     int     have_announce;
 
+/* legacyray: the rest of the panel metadata the subscription screen shows */
+    char    web_page_url[512];
+    int     have_web_page_url;
+    uint32_t update_interval_h; /* profile-update-interval, hours */
+    int     have_update_interval;
+    uint64_t refill_date;       /* subscription-refill-date, unix seconds */
+    int     have_refill_date;
+
     uint8_t *body;
     size_t   body_cap;
     size_t   body_len;

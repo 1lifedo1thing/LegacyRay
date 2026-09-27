@@ -36,9 +36,9 @@ static int read_text(const char *path, char *buf, size_t cap) {
 }
 
 int main(void) {
-    const char *cfg = "/tmp/senko-storefile.cfg";
-    const char *tmp = "/tmp/senko-storefile.cfg.tmp";
-    const char *victim = "/tmp/senko-storefile.victim";
+    const char *cfg = "/tmp/legacyray-storefile.cfg";
+    const char *tmp = "/tmp/legacyray-storefile.cfg.tmp";
+    const char *victim = "/tmp/legacyray-storefile.victim";
     unlink(cfg);
     unlink(tmp);
     unlink(victim);

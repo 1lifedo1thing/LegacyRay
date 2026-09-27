@@ -1,0 +1,100 @@
+#!/bin/sh
+# LegacyRay postinst for rootful jailbreaks on ios 4-7. every optional step
+# ends in "|| true": a missing tool must never leave dpkg half-configured.
+
+PLIST=/Library/LaunchDaemons/com.legacyray.daemon.plist
+APP=/Applications/LegacyRay.app
+KICK=/usr/bin/legacyray-kick
+SUBSTRATE_DIR=/Library/MobileSubstrate/DynamicLibraries
+CFG=/var/root/Library/Preferences/legacyray.cfg
+PREFS=/var/mobile/Library/Preferences
+STATUS_STATE=$PREFS/com.legacyray.status.state
+LAUNCHCTL=/bin/launchctl
+[ -x "$LAUNCHCTL" ] || LAUNCHCTL=/usr/bin/launchctl
+
+for bin in /usr/bin/legacyrayd /usr/bin/legacyrayctl /usr/bin/legacyrayawgd; do
+  [ -e "$bin" ] && chown root:wheel "$bin" && chmod 755 "$bin" || true
+done
+# the app runs as mobile and cannot signal the root daemon itself; the kick
+# helper is setuid root. a filesystem mounted nosuid is the one failure that
+# leaves dpkg happy and the app unable to start its daemon, so say so
+if [ -e "$KICK" ]; then
+  chown root:wheel "$KICK" || true
+  chmod 4755 "$KICK" || true
+  if [ ! -u "$KICK" ]; then
+    echo "legacyray-kick: setuid bit did not stick (nosuid mount?)" >> /var/log/legacyray-kick.log 2>/dev/null || true
+  fi
+fi
+chown root:wheel "$PLIST" 2>/dev/null || true
+chmod 644 "$PLIST" 2>/dev/null || true
+chown -R root:wheel /usr/lib/legacyraytlsfix 2>/dev/null || true
+chmod 755 /usr/lib/legacyraytlsfix.dylib /usr/lib/legacyraystatus.dylib 2>/dev/null || true
+
+# mobilesubstrate hooks, only where substrate exists. the tls hook stays off
+# when the standalone tlsfix tweak is installed: both would patch the same
+# functions
+if [ -e /Library/MobileSubstrate/MobileSubstrate.dylib ]; then
+  mkdir -p "$SUBSTRATE_DIR" || true
+  if dpkg -s com.tlsfix >/dev/null 2>&1 || [ -e "$SUBSTRATE_DIR/tlsfix.dylib" ]; then
+    rm -f "$SUBSTRATE_DIR/legacyraytlsfix.dylib" "$SUBSTRATE_DIR/legacyraytlsfix.plist"
+  else
+    ln -sf /usr/lib/legacyraytlsfix.dylib "$SUBSTRATE_DIR/legacyraytlsfix.dylib" || true
+    cp /usr/lib/legacyraytlsfix/substrate-filter.plist "$SUBSTRATE_DIR/legacyraytlsfix.plist" || true
+  fi
+  ln -sf /usr/lib/legacyraystatus.dylib "$SUBSTRATE_DIR/legacyraystatus.dylib" || true
+  cp /usr/lib/legacyraystatus.plist "$SUBSTRATE_DIR/legacyraystatus.plist" || true
+  chmod 644 "$SUBSTRATE_DIR"/legacyray*.plist 2>/dev/null || true
+fi
+
+# pfctl wants an os fingerprint file some jailbreaks do not ship
+[ -e /etc/pf.os ] || ln -s /usr/share/legacyray/pf.os /etc/pf.os 2>/dev/null || true
+
+mkdir -p "$PREFS/LegacyRay" /var/root/Library/Preferences || true
+chown mobile:mobile "$PREFS/LegacyRay" 2>/dev/null || true
+printf '0\n' > "$STATUS_STATE" 2>/dev/null || true
+chown mobile:mobile "$STATUS_STATE" "$PREFS/com.legacyray.tlsfix.plist" 2>/dev/null || true
+chmod 644 "$STATUS_STATE" "$PREFS/com.legacyray.tlsfix.plist" 2>/dev/null || true
+for log in /var/log/legacyray-system.log /var/log/legacyraytlsfix.log /tmp/legacyray-update.log; do
+  touch "$log" 2>/dev/null || true
+  chown root:mobile "$log" 2>/dev/null || true
+  chmod 660 "$log" 2>/dev/null || true
+done
+
+if [ ! -s "$CFG" ]; then
+  cat > "$CFG" <<'CFGEOF'
+V1
+SET socks_port 11080
+SET socks_public 0
+SET dns_upstream 8.8.8.8
+SET dns_local_port 10053
+SEL -1
+CFGEOF
+fi
+chown root:wheel "$CFG" 2>/dev/null || true
+chmod 600 "$CFG" 2>/dev/null || true
+
+if [ -d "$APP" ]; then
+  chown -R root:wheel "$APP" 2>/dev/null || true
+  chmod 755 "$APP" "$APP/LegacyRay" 2>/dev/null || true
+fi
+
+# the in-app updater runs this script itself and restarts the daemon after
+if [ "${SENKO_UPDATE:-0}" != "1" ]; then
+  "$LAUNCHCTL" unload "$PLIST" >/dev/null 2>&1 || true
+  killall -TERM legacyrayd >/dev/null 2>&1 || true
+  sleep 1
+  killall -9 legacyrayd >/dev/null 2>&1 || true
+  rm -f /var/tmp/legacyrayd.sock /var/tmp/legacyrayd.token
+  "$LAUNCHCTL" load -w "$PLIST" >/dev/null 2>&1 || "$LAUNCHCTL" load "$PLIST" >/dev/null 2>&1 || true
+fi
+
+echo "LegacyRay installed. Control socket: /var/tmp/legacyrayd.sock"
+
+# backgrounded: ios 6 uicache can deadlock against the running old app
+( uicache >/dev/null 2>&1 || true ) </dev/null &
+
+# the status bar hook loads into springboard, so a fresh install restarts it
+if [ "${SENKO_SKIP_RESPRING:-0}" != "1" ] && [ -z "$2" ]; then
+  ( sleep 2; killall -9 SpringBoard >/dev/null 2>&1 || true ) </dev/null >/dev/null 2>&1 &
+fi
+exit 0

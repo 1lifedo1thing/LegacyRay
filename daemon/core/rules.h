@@ -14,7 +14,12 @@ extern "C" {
 typedef enum {
     RULE_TYPE_DOMAIN_SUFFIX = 0,
     RULE_TYPE_DOMAIN_KEYWORD,
-    RULE_TYPE_IP_CIDR
+    RULE_TYPE_IP_CIDR,
+    /* legacyray: one exact name, without the subdomains a suffix would take */
+    RULE_TYPE_DOMAIN_FULL,
+    /* legacyray: a destination tcp port or an inclusive lo-hi range. names
+       never carry a port, so these are enforced by the firewall, not dns */
+    RULE_TYPE_PORT
 } rule_type_t;
 
 typedef enum {
@@ -30,6 +35,8 @@ typedef struct {
     uint8_t address[16];
     uint8_t prefix;
     uint8_t address_len;
+    uint16_t port_lo; /* RULE_TYPE_PORT only */
+    uint16_t port_hi;
     uint64_t hits;
 } rule_t;
 
@@ -60,7 +67,13 @@ rule_action_t ruleset_match_domain(ruleset_t *rules, const char *domain,
 rule_action_t ruleset_match_ip(ruleset_t *rules, const char *ip,
                                size_t *matched_index);
 
+/* how many port rules the firewall layers can carry; ipfw has a fixed number
+   range and pf rules are emitted once per interface */
+#define RULESET_MAX_PORT_RULES 8
+
 const char *rule_type_name(rule_type_t type);
+/* 1 when a rule is enforced by the firewall rather than by the dns proxy */
+int rule_is_port(const rule_t *rule);
 const char *rule_action_name(rule_action_t action);
 uint64_t rule_hit_count(const rule_t *rule);
 

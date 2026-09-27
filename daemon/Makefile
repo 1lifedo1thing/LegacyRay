@@ -25,18 +25,18 @@ DAEMON_SRC = dialer.c loop.c pf_natlook.c ctl_server.c daemon_ctl.c storefile.c 
 
 .PHONY: all clean
 
-all: senkod senkoctl senkoawgd
+all: legacyrayd legacyrayctl legacyrayawgd
 
-senkod: $(CORE_SRC) $(DAEMON_SRC)
+legacyrayd: $(CORE_SRC) $(DAEMON_SRC)
 	$(CC) $(CFLAGS) $(THREAD_CFLAGS) $(TLS_CFLAGS) $(CORE_SRC) $(DAEMON_SRC) -o $@ $(LDFLAGS) $(TLS_LDFLAGS) -lz $(THREAD_LDFLAGS)
 
-# senkoctl decodes the plain control protocol and fetch payloads
-senkoctl: senkoctl.c core/b64.c
+# legacyrayctl decodes the plain control protocol and fetch payloads
+legacyrayctl: senkoctl.c core/b64.c
 	$(CC) $(CFLAGS) senkoctl.c core/b64.c -o $@ $(LDFLAGS)
 
-senkoawgd: senkoawgd.c awg_utun.c awg_route.c awg_pfroute.c core/awg_config.c core/awg_handshake.c core/awg_tunnel.c core/b64.c core/reality_crypto.c status.c legacy_ios.c proc_detach.c
+legacyrayawgd: senkoawgd.c awg_utun.c awg_route.c awg_pfroute.c core/awg_config.c core/awg_handshake.c core/awg_tunnel.c core/b64.c core/reality_crypto.c status.c legacy_ios.c proc_detach.c
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) senkoawgd.c awg_utun.c awg_route.c awg_pfroute.c core/awg_config.c core/awg_handshake.c \
 	      core/awg_tunnel.c core/b64.c core/reality_crypto.c status.c legacy_ios.c proc_detach.c -o $@ $(LDFLAGS) $(TLS_LDFLAGS)
 
 clean:
-	rm -f senkod senkoctl senkoawgd
+	rm -f legacyrayd legacyrayctl legacyrayawgd

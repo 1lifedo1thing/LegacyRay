@@ -23,7 +23,7 @@ void senko_upload_flush(session_t *s) {
 #include <sys/time.h>
 
 #define UPLOAD_MAGIC "SNKU"
-#define UPLOAD_DIR   "/var/log/senko-upload"
+#define UPLOAD_DIR   "/var/log/legacyray-upload"
 
 #define UPLOAD_BUF_MAX (64 * 1024)
 
@@ -120,7 +120,7 @@ void senko_upload_flush(session_t *s) {
     fclose(f);
 
     fprintf(stderr,
-            "senko-upload: wrote %s in_chunks=%u wire_chunks=%u "
+            "legacyray-upload: wrote %s in_chunks=%u wire_chunks=%u "
             "in_bytes=%zu wire_bytes=%zu host=%s\n",
             path, s->upload_in_chunks, s->upload_wire_chunks,
             s->upload_in_len, s->upload_wire_len,

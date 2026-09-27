@@ -48,6 +48,11 @@ url_status_t url_build_get_cookie_header(const url_t *u, const char *cookie,
                                          const char *request_header,
                                          char *buf, size_t cap, size_t *out_len);
 
+/* legacyray: the User-Agent subscription fetches send unless the
+   subscription carries its own; -1 on an empty or control-character value */
+int url_set_default_user_agent(const char *ua);
+const char *url_default_user_agent(void);
+
 #ifdef __cplusplus
 }
 #endif

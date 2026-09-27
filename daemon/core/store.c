@@ -476,6 +476,21 @@ store_status_t store_set_sub_title(store_t *st, size_t sub_index,
     return STORE_OK;
 }
 
+store_status_t store_set_sub_extra(store_t *st, size_t sub_index,
+                                   uint32_t update_interval_h,
+                                   uint64_t refill_date,
+                                   const char *web_page_url) {
+    if (!st) return STORE_ERR_ARG;
+    if (sub_index >= STORE_MAX_SUBS || !st->subs[sub_index].used)
+        return STORE_ERR_RANGE;
+    store_sub_t *sub = &st->subs[sub_index];
+    sub->update_interval_h = update_interval_h;
+    sub->refill_date = refill_date;
+    snprintf(sub->web_page_url, sizeof sub->web_page_url, "%s",
+             web_page_url ? web_page_url : "");
+    return STORE_OK;
+}
+
 static int valid_sub_header(const char *header) {
     if (!header || !header[0]) return 1;
     const char *colon = strchr(header, ':');
@@ -802,6 +817,16 @@ store_status_t store_serialize(const store_t *st, char *buf, size_t cap, size_t 
         n = snprintf(buf + off, cap - off, "SUBHDR %zu %s\n", i, header);
         if (n < 0 || (size_t)n >= cap - off) return STORE_ERR_FULL;
         off += (size_t)n;
+/* legacyray: a line of its own for the same reason SUBREFRESH has one */
+        char web[1536];
+        if (pct_encode(st->subs[i].web_page_url, web, sizeof web) < 0)
+            return STORE_ERR_FULL;
+        n = snprintf(buf + off, cap - off, "SUBEXTRA %zu %u %llu %s\n", i,
+                     (unsigned)st->subs[i].update_interval_h,
+                     (unsigned long long)st->subs[i].refill_date,
+                     web[0] ? web : "-");
+        if (n < 0 || (size_t)n >= cap - off) return STORE_ERR_FULL;
+        off += (size_t)n;
     }
 
     n = snprintf(buf + off, cap - off, "ORDER");
@@ -974,6 +999,37 @@ store_status_t store_deserialize(store_t *st, const char *buf, size_t len) {
                                            support_url, sizeof support_url) >= 0)
                         store_set_sub_meta(st, (size_t)idx, upload, download, total,
                                            description, support_url);
+                }
+            }
+        } else if (llen >= 9 && memcmp(p, "SUBEXTRA ", 9) == 0) {
+            const char *starts[4], *ends[4], *q = p + 9;
+            size_t fields = 0;
+            while (q < le && fields < 4) {
+                while (q < le && *q == ' ') ++q;
+                if (q >= le) break;
+                starts[fields] = q;
+                ends[fields] = memchr(q, ' ', (size_t)(le - q));
+                if (!ends[fields]) ends[fields] = le;
+                q = ends[fields];
+                fields++;
+            }
+            int idx = -1;
+            uint64_t interval = 0, refill = 0;
+            if (fields == 4 && parse_int(starts[0], ends[0], &idx) == 0 &&
+                parse_u64(starts[1], ends[1], &interval) == 0 &&
+                parse_u64(starts[2], ends[2], &refill) == 0 &&
+                idx >= 0 && idx < STORE_MAX_SUBS && st->subs[idx].used &&
+                interval <= 8760) {
+                char web[sizeof st->subs[0].web_page_url];
+                size_t wl = (size_t)(ends[3] - starts[3]);
+                if (wl < sizeof web) {
+                    memcpy(web, starts[3], wl);
+                    web[wl] = '\0';
+                    if (strcmp(web, "-") == 0) web[0] = '\0';
+                    if (url_percent_decode(web, strlen(web), web, sizeof web) < 0)
+                        web[0] = '\0';
+                    store_set_sub_extra(st, (size_t)idx, (uint32_t)interval,
+                                        refill, web);
                 }
             }
         } else if (llen >= 7 && memcmp(p, "SUBHDR ", 7) == 0) {

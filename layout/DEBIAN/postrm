@@ -1,0 +1,23 @@
+#!/bin/sh
+SUBSTRATE_DIR=/Library/MobileSubstrate/DynamicLibraries
+case "$1" in
+  remove|purge)
+    killall -9 legacyrayd legacyrayawgd >/dev/null 2>&1 || true
+    rm -f /var/tmp/legacyrayd.sock /var/tmp/legacyrayd.token /var/run/legacyray-pf.conf
+    rm -f "$SUBSTRATE_DIR/legacyraytlsfix.dylib" "$SUBSTRATE_DIR/legacyraytlsfix.plist" \
+          "$SUBSTRATE_DIR/legacyraystatus.dylib" "$SUBSTRATE_DIR/legacyraystatus.plist"
+    rm -f /var/mobile/Library/Preferences/com.legacyray.status.state \
+          /var/mobile/Library/Preferences/com.legacyray.status.log \
+          /var/mobile/Library/Preferences/com.legacyray.status.off
+    [ -L /etc/pf.os ] && [ "$(readlink /etc/pf.os)" = /usr/share/legacyray/pf.os ] && rm -f /etc/pf.os
+    ( uicache >/dev/null 2>&1 || true ) </dev/null &
+    ;;
+esac
+if [ "$1" = purge ]; then
+  # the device id survives a plain remove: panels that count devices would
+  # otherwise burn a slot on every reinstall
+  rm -f /var/mobile/Library/Preferences/com.legacyray.hwid /var/root/Library/Preferences/legacyray.cfg
+  rm -rf /var/mobile/Library/Preferences/LegacyRay
+  rm -f /var/log/legacyray-system.log /var/log/legacyraytlsfix.log /var/log/legacyray-kick.log
+fi
+exit 0

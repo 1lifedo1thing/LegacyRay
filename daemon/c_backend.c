@@ -22,13 +22,13 @@ static int enable_listener(loop_t *loop, int port, int sockname_dest) {
 static int rung_ok(c_backend_t *cb, loop_t *loop, int port, int sockname_dest,
                    c_backend_verify_fn verify, void *verify_ctx) {
     if (enable_listener(loop, port, sockname_dest) != 0) {
-        fprintf(stderr, "senkod: c backend: transparent listener on port %d failed\n",
+        fprintf(stderr, "legacyrayd: c backend: transparent listener on port %d failed\n",
                 port);
         return -1;
     }
     cb->redir_port = port;
     if (verify && verify(verify_ctx) != 0) {
-        fprintf(stderr, "senkod: c backend: rules were accepted but no traffic "
+        fprintf(stderr, "legacyrayd: c backend: rules were accepted but no traffic "
                         "reached the listener\n");
         loop_disable_tproxy(loop);
         cb->redir_port = 0;
@@ -90,8 +90,8 @@ int c_backend_start(c_backend_t *cb, loop_t *loop, int socks_port,
    firewall, the thing the user has to install */
     set_reason(reason, reason_cap,
                pinned_app_proxy
-                   ? "the connect hook was pinned but senkotlsfix is not loaded"
-               : "no usable firewall backend (need pfctl, ipfw, or senkotlsfix)");
+                   ? "the connect hook was pinned but legacyraytlsfix is not loaded"
+               : "no usable firewall backend (need pfctl, ipfw, or legacyraytlsfix)");
     memset(cb, 0, sizeof *cb);
     return -1;
 }

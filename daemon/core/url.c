@@ -7,6 +7,25 @@
 #include <string.h>
 #include <unistd.h>
 
+/* legacyray: panels pick a feed format by client id, and a few only answer
+   the one they were built for, so the default is a setting */
+static char g_user_agent[64] = "Happ/3.26.1";
+
+int url_set_default_user_agent(const char *ua) {
+    size_t n = ua ? strlen(ua) : 0;
+    if (n == 0 || n >= sizeof g_user_agent) return -1;
+    for (size_t i = 0; i < n; ++i) {
+        unsigned char c = (unsigned char)ua[i];
+        if (c < 0x20 || c == 0x7f) return -1;
+    }
+    memcpy(g_user_agent, ua, n + 1);
+    return 0;
+}
+
+const char *url_default_user_agent(void) {
+    return g_user_agent;
+}
+
 url_status_t url_parse(const char *url, url_t *out) {
     if (!url || !out) return URL_ERR_ARG;
     memset(out, 0, sizeof *out);
@@ -272,7 +291,7 @@ url_status_t url_build_get_cookie_header(const url_t *u, const char *cookie,
     off += (size_t)n;
     if (!custom_ua) {
         /* providers use the client id to select a compatible feed format */
-        n = snprintf(buf + off, cap - off, "User-Agent: Happ/3.26.1\r\n");
+        n = snprintf(buf + off, cap - off, "User-Agent: %s\r\n", g_user_agent);
         if (n < 0 || (size_t)n >= cap - off) return URL_ERR_TOOLONG;
         off += (size_t)n;
     }

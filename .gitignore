@@ -1,37 +1,27 @@
 # build outputs
 build/
 app/build/
-app/build-arm64/
 daemon/build/
-.build-slices/
-.ipa-build/
+tweaks/*/build/
+.stage/
+packages/
+*.deb
 
-# host / device binaries (rebuild via Makefile / build_deb.sh)
-daemon/senkod
-daemon/senkod-arm
-daemon/senkoctl
-daemon/senkoawgd
-daemon/senko-awgd
-daemon/vless4sd
-daemon/senko-kick
+# static openssl copied in by scripts/build_deps.sh for the xcode daemon targets
+deps/
+
+# xcode per-user state
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+DerivedData/
+
+# host test binaries
 tests/test_*
 !tests/test_*.c
 !tests/test_*.h
 tests/fuzz_*
 !tests/fuzz_*.c
 !tests/fuzz_*.h
-senkotlsfix/*.dylib
-status/*.dylib
-status/build-install/
-
-# packaging stage (templates under DEBIAN/Library/var stay)
-packaging/usr/
-packaging/Applications/
-
-# release artifacts
-*.deb
-*.Packages
-*.ipa
 
 # objects / archives
 *.o
@@ -42,5 +32,5 @@ packaging/Applications/
 *.sock
 *.cfg
 *.log
-build-deb.log
 .DS_Store
+__pycache__/

@@ -18,7 +18,7 @@
 
 #define FWD_RULE_MIN 12000
 #define FWD_RULE_MAX 12098
-#define C_PROXY_STATE "/var/run/senko-c-proxy"
+#define C_PROXY_STATE "/var/run/legacyray-c-proxy"
 
 static int ipfw_del(int number) {
     const char *ipfw = routing_find_ipfw();
@@ -59,13 +59,13 @@ void routing_fwd_clear_rules(void) {
 }
 
 static int application_proxy_available(void) {
-    return access(SENKO_SUBSTRATE_DIR "/senkotlsfix.dylib", R_OK) == 0;
+    return access(SENKO_SUBSTRATE_DIR "/legacyraytlsfix.dylib", R_OK) == 0;
 }
 
 int routing_fwd_app_proxy_up(routing_fwd_t *st, int socks_port) {
     if (!st || socks_port <= 0 || socks_port > 65535) return -1;
     if (!application_proxy_available()) {
-        fprintf(stderr, "senkod: c backend: application proxy hook is not installed\n");
+        fprintf(stderr, "legacyrayd: c backend: application proxy hook is not installed\n");
         return -1;
     }
     char tmp[128];
@@ -83,7 +83,7 @@ int routing_fwd_app_proxy_up(routing_fwd_t *st, int socks_port) {
     if (ok) ok = rename(tmp, C_PROXY_STATE) == 0;
     if (!ok) {
         (void)unlink(tmp);
-        fprintf(stderr, "senkod: c backend: application proxy state failed: %s\n",
+        fprintf(stderr, "legacyrayd: c backend: application proxy state failed: %s\n",
                 strerror(errno));
         return -1;
     }
@@ -92,7 +92,7 @@ int routing_fwd_app_proxy_up(routing_fwd_t *st, int socks_port) {
     st->redir_port = socks_port;
     st->app_proxy = 1;
     st->active = 1;
-    fprintf(stderr, "senkod: c backend: application proxy on 127.0.0.1:%d\n",
+    fprintf(stderr, "legacyrayd: c backend: application proxy on 127.0.0.1:%d\n",
             socks_port);
     return 0;
 }
@@ -153,7 +153,7 @@ int routing_fwd_up(routing_fwd_t *st, int socks_port,
     routing_fwd_clear_rules();
 
     if (add_bypasses(st) != 0) {
-        fprintf(stderr, "senkod: c backend: ipfw bypass rules rejected\n");
+        fprintf(stderr, "legacyrayd: c backend: ipfw bypass rules rejected\n");
         routing_fwd_clear_rules();
         return -1;
     }
@@ -162,7 +162,7 @@ int routing_fwd_up(routing_fwd_t *st, int socks_port,
     if (snprintf(rule, sizeof rule,
                  "%d check-state", FWD_RULE_MAX - 1) >= (int)sizeof rule ||
         ipfw_add(rule) != 0) {
-        fprintf(stderr, "senkod: c backend: ipfw check-state rejected\n");
+        fprintf(stderr, "legacyrayd: c backend: ipfw check-state rejected\n");
         routing_fwd_clear_rules();
         return -1;
     }
@@ -172,19 +172,19 @@ int routing_fwd_up(routing_fwd_t *st, int socks_port,
                  "%d fwd 127.0.0.1,%d tcp from any to any out setup keep-state",
                  FWD_RULE_MAX, redir) >= (int)sizeof rule ||
         ipfw_add(rule) != 0) {
-        fprintf(stderr, "senkod: c backend: ipfw fwd rule rejected\n");
+        fprintf(stderr, "legacyrayd: c backend: ipfw fwd rule rejected\n");
         routing_fwd_clear_rules();
         return -1;
     }
 
     if (routing_scopedroute_disable(st->scoped_route_prev,
                                     sizeof st->scoped_route_prev) != 0)
-        fprintf(stderr, "senkod: c backend: scopedroute tweak failed, "
+        fprintf(stderr, "legacyrayd: c backend: scopedroute tweak failed, "
                         "ipfw fwd may not reach the listener\n");
 
     st->redir_port = redir;
     st->active = 1;
-    fprintf(stderr, "senkod: c backend: ipfw fwd to 0.0.0.0:%d\n", redir);
+    fprintf(stderr, "legacyrayd: c backend: ipfw fwd to 0.0.0.0:%d\n", redir);
     return 0;
 }
 

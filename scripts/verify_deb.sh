@@ -53,10 +53,10 @@ fi
 [ -x data/var/jb/Applications/Senko.app/senko ] || {
   echo "universal app payload missing" >&2; exit 1;
 }
-[ -x data/var/jb/usr/bin/senkod ] || {
+[ -x data/var/jb/usr/bin/legacyrayd ] || {
   echo "universal daemon payload missing" >&2; exit 1;
 }
-[ -f data/var/jb/Library/LaunchDaemons/com.senko.senkod.plist ] || {
+[ -f data/var/jb/Library/LaunchDaemons/com.legacyray.daemon.plist ] || {
   echo "universal launchd plist missing" >&2; exit 1;
 }
 [ -f data/var/jb/etc/pf.os ] || {
@@ -66,8 +66,8 @@ if [ -e data/Applications ] || [ -e data/usr ] || [ -e data/Library ]; then
   echo "universal package would write into the rootless sealed root" >&2
   exit 1
 fi
-grep -q '<string>/var/jb/usr/bin/senkod</string>' \
-  data/var/jb/Library/LaunchDaemons/com.senko.senkod.plist || {
+grep -q '<string>/var/jb/usr/bin/legacyrayd</string>' \
+  data/var/jb/Library/LaunchDaemons/com.legacyray.daemon.plist || {
     echo "universal launchd program path mismatch" >&2; exit 1;
   }
 grep -q 'install_rootful_layout' control/postinst || {

@@ -18,6 +18,8 @@
 #include "legacy_ios.h"
 #include "go_config.h"
 #include "routing.h"
+#include "routing_exec.h"
+#include "core/reality_handshake.h"
 #include "../common/senko_paths.h"
 
 #include <errno.h>
@@ -62,14 +64,34 @@ void daemon_ctl_set_full_device(daemon_ctl_t *d, int on) {
     if (d) d->full_device = on ? 1 : 0;
 }
 
+/* legacyray: push the settings that live in module globals (routing policy,
+   reality version, subscription user agent) to their owners */
+static void daemon_settings_publish(const daemon_settings_t *s, const ruleset_t *rules) {
+    if (!s) return;
+    routing_set_policy(s->bypass_lan, s->rules_enabled ? rules : NULL);
+    routing_exec_set_default_action(s->rules_default ? RULE_ACTION_DIRECT
+                                                     : RULE_ACTION_PROXY);
+    (void)reality_set_client_version(s->xray_version);
+    (void)url_set_default_user_agent(s->sub_user_agent);
+}
+
 void daemon_ctl_set_settings(daemon_ctl_t *d, const daemon_settings_t *s) {
     if (!d || !s) return;
     d->settings = *s;
     senko_trace_set_enabled(d->settings.trace);
+    daemon_settings_publish(&d->settings, d->rules);
 }
 
 void daemon_ctl_set_rules(daemon_ctl_t *d, ruleset_t *rules) {
-    if (d) d->rules = rules;
+    if (!d) return;
+    d->rules = rules;
+    daemon_settings_publish(&d->settings, d->rules);
+}
+
+/* legacyray: the ruleset a backend should enforce, or none while the routing
+   switch is off */
+static ruleset_t *active_rules(daemon_ctl_t *d) {
+    return d->settings.rules_enabled ? d->rules : NULL;
 }
 
 void daemon_ctl_shutdown(daemon_ctl_t *d) {
@@ -85,7 +107,7 @@ void daemon_ctl_shutdown(daemon_ctl_t *d) {
 int daemon_ctl_maintain(daemon_ctl_t *d) {
     if (!d || !d->go.active) return 0;
     if (go_backend_running(&d->go)) return 0;
-    fprintf(stderr, "senkod: go backend core exited unexpectedly\n");
+    fprintf(stderr, "legacyrayd: go backend core exited unexpectedly\n");
     go_backend_stop(&d->go);
     loop_stop(d->loop);
     status_set(0);
@@ -200,7 +222,7 @@ int daemon_ctl_native_config(void *ctx, const vl_server_t *server, char *buf,
 static int routing_path_probe(daemon_ctl_t *d, int timeout_ms);
 
 /* the c backend ladder only learns whether pfctl or ipfw accepted a ruleset,
-   so senkod has to push a real connection through and watch it arrive */
+   so legacyrayd has to push a real connection through and watch it arrive */
 static int c_backend_verify(void *ctx) {
     return routing_path_probe((daemon_ctl_t *)ctx, 2000);
 }
@@ -219,19 +241,19 @@ int daemon_ctl_apply(void *ctx, const ctl_action_t *action) {
             int quic_only = (s->proto == VL_PROTO_HYSTERIA2);
             if (quic_only) {
                 if (!d->full_device) {
-                    fprintf(stderr, "senkod: hysteria2 requires full-device mode\n");
+                    fprintf(stderr, "legacyrayd: hysteria2 requires full-device mode\n");
                     status_set(0);
                     return DCTL_ERR_TRANSPORT;
                 }
                 if (d->settings.force_backend == SENKO_BACKEND_C ||
                     d->settings.force_backend == SENKO_BACKEND_APP_PROXY) {
-                    fprintf(stderr, "senkod: hysteria2 requires the go backend, "
+                    fprintf(stderr, "legacyrayd: hysteria2 requires the go backend, "
                                     "but the c backend is pinned in settings\n");
                     status_set(0);
                     return DCTL_ERR_TRANSPORT;
                 }
                 if (!go_backend_supported()) {
-                    fprintf(stderr, "senkod: hysteria2 requires the go backend, "
+                    fprintf(stderr, "legacyrayd: hysteria2 requires the go backend, "
                                     "unsupported on this device\n");
                     status_set(0);
                     return DCTL_ERR_TRANSPORT;
@@ -240,7 +262,7 @@ int daemon_ctl_apply(void *ctx, const ctl_action_t *action) {
 
             const transport_vt_t *vt = quic_only ? NULL : transport_for_server(s);
             if (!vt && !quic_only) {
-                fprintf(stderr, "senkod: unsupported transport/security for server\n");
+                fprintf(stderr, "legacyrayd: unsupported transport/security for server\n");
                 status_set(0);
                 return DCTL_ERR_TRANSPORT;
             }
@@ -249,7 +271,7 @@ int daemon_ctl_apply(void *ctx, const ctl_action_t *action) {
             memset(uuid, 0, sizeof uuid);
             if (s->proto == VL_PROTO_VLESS) {
                 if (vless_uuid_parse(s->uuid, uuid) != VLESS_OK) {
-                    fprintf(stderr, "senkod: bad uuid in server link\n");
+                    fprintf(stderr, "legacyrayd: bad uuid in server link\n");
                     status_set(0);
                     return DCTL_ERR_UUID;
                 }
@@ -270,7 +292,7 @@ int daemon_ctl_apply(void *ctx, const ctl_action_t *action) {
                                     s->proto, uuid, s->flow, s->user, s->pass,
                                     s->sni, s->fp, s->pbk, s->sid, s->path,
                                     s->ws_host, s->mode, s->host, s->insecure) != LOOP_OK) {
-                    fprintf(stderr, "senkod: socks listener failed\n");
+                    fprintf(stderr, "legacyrayd: socks listener failed\n");
                     status_set(0);
                     return DCTL_ERR_LOOP;
                 }
@@ -283,7 +305,7 @@ int daemon_ctl_apply(void *ctx, const ctl_action_t *action) {
 
                 if (resolve_ipv4_addresses(s->host, first_ip, sizeof first_ip,
                                            ip_list, sizeof ip_list, 0) != 0) {
-                    fprintf(stderr, "senkod: dns resolution failed for %s\n", s->host);
+                    fprintf(stderr, "legacyrayd: dns resolution failed for %s\n", s->host);
                     loop_stop(d->loop);
                     status_set(0);
                     return DCTL_ERR_DNS;
@@ -309,11 +331,11 @@ int daemon_ctl_apply(void *ctx, const ctl_action_t *action) {
                     (force.backend == SENKO_BACKEND_AUTO && go_backend_supported());
                 int routing_ok;
                 if (go_attempted) {
-                    routing_ok = go_backend_start(&d->go, s, first_ip, d->rules,
+                    routing_ok = go_backend_start(&d->go, s, first_ip, active_rules(d),
                                                   backend_reason,
                                                   sizeof backend_reason) == 0;
                     if (!routing_ok)
-                        fprintf(stderr, "senkod: go backend failed: %s\n",
+                        fprintf(stderr, "legacyrayd: go backend failed: %s\n",
                                 backend_reason[0] ? backend_reason : "unknown error");
                 } else {
                     routing_ok = c_backend_start(&d->c_backend, d->loop,
@@ -322,12 +344,12 @@ int daemon_ctl_apply(void *ctx, const ctl_action_t *action) {
                                                  d->settings.dns_upstream,
                                                  (int)d->settings.dns_local_port,
                                                  d->settings.block_response,
-                                                 d->rules, &force,
+                                                 active_rules(d), &force,
                                                  c_backend_verify, d,
                                                  backend_reason,
                                                  sizeof backend_reason) == 0;
                     if (!routing_ok)
-                        fprintf(stderr, "senkod: c backend failed: %s\n",
+                        fprintf(stderr, "legacyrayd: c backend failed: %s\n",
                                 backend_reason[0] ? backend_reason : "unknown error");
                 }
                 if (!routing_ok) {
@@ -338,7 +360,7 @@ int daemon_ctl_apply(void *ctx, const ctl_action_t *action) {
                     return go_attempted ? DCTL_ERR_GO : DCTL_ERR_ROUTING;
                 }
                 if (c_backend_uses_tproxy(&d->c_backend))
-                    fprintf(stderr, "senkod: c backend: transparent tcp on port %d\n",
+                    fprintf(stderr, "legacyrayd: c backend: transparent tcp on port %d\n",
                             d->c_backend.redir_port);
             }
             return 0;
@@ -370,6 +392,7 @@ int daemon_ctl_apply(void *ctx, const ctl_action_t *action) {
             if (r == SETTINGS_ERR_KEY) return DCTL_ERR_SETTING_KEY;
             if (r != SETTINGS_OK) return DCTL_ERR_SETTING_VALUE;
             senko_trace_set_enabled(d->settings.trace);
+            daemon_settings_publish(&d->settings, d->rules);
             return 0;
         }
 
@@ -435,20 +458,20 @@ static const char *file_state(const char *path, char *out, size_t cap) {
     return out;
 }
 
-/* senko-kick is a one shot helper, not a resident process, so the useful facts
+/* legacyray-kick is a one shot helper, not a resident process, so the useful facts
    are whether it can run at all and when it last did */
 static const char *kick_state(char *out, size_t cap) {
     struct stat binary;
     struct stat log;
-    if (stat(SENKO_USR_BIN "/senko-kick", &binary) != 0) {
+    if (stat(SENKO_USR_BIN "/legacyray-kick", &binary) != 0) {
         snprintf(out, cap, "missing");
         return out;
     }
-    if (access(SENKO_USR_BIN "/senko-kick", X_OK) != 0) {
+    if (access(SENKO_USR_BIN "/legacyray-kick", X_OK) != 0) {
         snprintf(out, cap, "installed, not executable");
         return out;
     }
-    if (stat("/var/log/senko-kick.log", &log) == 0) {
+    if (stat("/var/log/legacyray-kick.log", &log) == 0) {
         long age = (long)(time(NULL) - log.st_mtime);
         if (age < 0) age = 0;
         snprintf(out, cap, "ready, last ran %ld s ago", age);
@@ -594,7 +617,7 @@ int daemon_ctl_diag(void *ctx, char *buf, size_t cap, size_t *len) {
     }
     diag_top_rules(d->rules, buf, cap, &off);
 
-    diag_add(buf, cap, &off, "sub.user_agent", "Happ/3.26.1");
+    diag_add(buf, cap, &off, "sub.user_agent", "%s", url_default_user_agent());
     if (d->settings.sub_ignore_gating)
         diag_add(buf, cap, &off, "sub.gating", "ignored, placeholder feeds accepted");
     diag_add(buf, cap, &off, "trace", "%s",
@@ -606,14 +629,14 @@ int daemon_ctl_diag(void *ctx, char *buf, size_t cap, size_t *len) {
     diag_add(buf, cap, &off, "path.log", "%s", SENKO_SYSTEM_LOG);
     diag_add(buf, cap, &off, "path.substrate", "%s", SENKO_SUBSTRATE_DIR);
 
-    diag_add(buf, cap, &off, "proc.senkoawgd", "%s",
-             proc_state("/var/run/senkoawgd.pid", scratch, sizeof scratch));
+    diag_add(buf, cap, &off, "proc.legacyrayawgd", "%s",
+             proc_state("/var/run/legacyrayawgd.pid", scratch, sizeof scratch));
     diag_add(buf, cap, &off, "proc.senko_kick", "%s",
              kick_state(scratch, sizeof scratch));
     diag_add(buf, cap, &off, "substrate.tlsfix", "%s",
-             file_state(SENKO_SUBSTRATE_DIR "/senkotlsfix.dylib", scratch, sizeof scratch));
+             file_state(SENKO_SUBSTRATE_DIR "/legacyraytlsfix.dylib", scratch, sizeof scratch));
     diag_add(buf, cap, &off, "substrate.status", "%s",
-             file_state(SENKO_SUBSTRATE_DIR "/senkostatus.dylib", scratch, sizeof scratch));
+             file_state(SENKO_SUBSTRATE_DIR "/legacyraystatus.dylib", scratch, sizeof scratch));
     if (d->last_reason[0])
         diag_add(buf, cap, &off, "backend.last_error", "%s", d->last_reason);
 
@@ -666,8 +689,8 @@ void daemon_ctl_persist(void *ctx, const store_t *store) {
     storefile_save(store, &d->settings, d->config_path);
 }
 
-#define SENKO_BACKUP_EXPORT "/var/mobile/Documents/senko-backup.senko"
-#define SENKO_BACKUP_IMPORT "/var/mobile/Library/Preferences/Senko/import.senko"
+#define SENKO_BACKUP_EXPORT "/var/mobile/Documents/legacyray-backup.lray"
+#define SENKO_BACKUP_IMPORT "/var/mobile/Library/Preferences/LegacyRay/import.lray"
 
 int daemon_ctl_backup(void *ctx, int restore, store_t *store) {
     daemon_ctl_t *d = (daemon_ctl_t *)ctx;
@@ -691,6 +714,7 @@ int daemon_ctl_backup(void *ctx, int restore, store_t *store) {
         return -1;
     *store = candidate;
     d->settings = candidate_settings;
+    daemon_settings_publish(&d->settings, d->rules);
     (void)unlink(SENKO_BACKUP_IMPORT);
     return 0;
 }
@@ -1020,7 +1044,7 @@ int daemon_ctl_fetch(void *ctx, const char *url,
     if ((r == SUBFETCH_ERR_DIAL || r == SUBFETCH_ERR_TRANSPORT) &&
         !dial_ctx.force_direct) {
         dial_ctx.force_direct = 1;
-        fprintf(stderr, "senkod: subfetch retrying direct, bypassing the tunnel\n");
+        fprintf(stderr, "legacyrayd: subfetch retrying direct, bypassing the tunnel\n");
         r = subfetch_get_info(&cfg, url, buf, cap, len, 15000, &info);
     }
     if (r != SUBFETCH_OK) {
@@ -1038,10 +1062,10 @@ int daemon_ctl_fetch(void *ctx, const char *url,
 /* redaction prevents subscription credentials from reaching system logs */
         url_t u;
         if (url && url_parse(url, &u) == URL_OK)
-            fprintf(stderr, "senkod: subfetch failed: %s (rc=%d) %s://%s:%u/...\n",
+            fprintf(stderr, "legacyrayd: subfetch failed: %s (rc=%d) %s://%s:%u/...\n",
                     why, (int)r, u.is_https ? "https" : "http", u.host, (unsigned)u.port);
         else
-            fprintf(stderr, "senkod: subfetch failed: %s (rc=%d)\n", why, (int)r);
+            fprintf(stderr, "legacyrayd: subfetch failed: %s (rc=%d)\n", why, (int)r);
         return -1;
     }
     if (meta) {
@@ -1054,8 +1078,11 @@ int daemon_ctl_fetch(void *ctx, const char *url,
         snprintf(meta->support_url, sizeof meta->support_url, "%s", info.support_url);
         meta->gated = info.gated;
         snprintf(meta->gate_reason, sizeof meta->gate_reason, "%s", info.gate_reason);
+        snprintf(meta->web_page_url, sizeof meta->web_page_url, "%s", info.web_page_url);
+        meta->update_interval_h = info.update_interval_h;
+        meta->refill_date = info.refill_date;
     }
-    fprintf(stderr, "senkod: subfetch ok %zu bytes\n", len ? *len : 0);
+    fprintf(stderr, "legacyrayd: subfetch ok %zu bytes\n", len ? *len : 0);
     return 0;
 }
 
@@ -1142,7 +1169,7 @@ static void probe_bind_physical_interface(int fd, int full_device) {
     unsigned int index = if_nametoindex(iface);
     if (!index) return;
     if (setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &index, sizeof index) != 0)
-        fprintf(stderr, "senkod: probe could not bind %s: %s\n",
+        fprintf(stderr, "legacyrayd: probe could not bind %s: %s\n",
                 iface, strerror(errno));
 #else
     (void)fd;
@@ -1652,7 +1679,7 @@ int daemon_ctl_verify_tunnel(void *ctx, char *reason, size_t reason_cap) {
     if (backend_path_probe(d) != 0) {
         static const char failure[] =
             "routing rules accepted but traffic was not redirected";
-        fprintf(stderr, "senkod: routing verification failed: %s\n", failure);
+        fprintf(stderr, "legacyrayd: routing verification failed: %s\n", failure);
         if (reason && reason_cap) snprintf(reason, reason_cap, "%s", failure);
         status_set(0);
         return -1;
@@ -1664,7 +1691,7 @@ int daemon_ctl_verify_tunnel(void *ctx, char *reason, size_t reason_cap) {
         ? go_carry_probe(d, timeout_ms, NULL, stage, sizeof stage)
         : tunnel_carry_probe(d, timeout_ms, NULL, stage, sizeof stage);
     if (r != 0) {
-        fprintf(stderr, "senkod: tunnel verify failed: %s (%dms)\n",
+        fprintf(stderr, "legacyrayd: tunnel verify failed: %s (%dms)\n",
                 stage[0] ? stage : "unknown", timeout_ms);
         if (reason && reason_cap)
             snprintf(reason, reason_cap, "%s",

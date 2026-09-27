@@ -39,7 +39,7 @@
 #define S_ISSOCK(m) (((m) & S_IFMT) == S_IFSOCK)
 #endif
 
-#define AWG_PID_PATH "/var/run/senkoawgd.pid"
+#define AWG_PID_PATH "/var/run/legacyrayawgd.pid"
 
 /* one connect has to answer while a client is still waiting, and every attempt
    carries a dns lookup, a handshake and a verify probe */
@@ -301,7 +301,7 @@ static size_t build_stats(ctl_server_t *s, char *line, size_t cap) {
     if (!s->stats) return 0;
     if (s->stats(s->apply_ctx, &up, &down) != 0) {
         if (!s->stat_failed)
-            fprintf(stderr, "senkod: traffic counters unavailable\n");
+            fprintf(stderr, "legacyrayd: traffic counters unavailable\n");
         s->stat_failed = 1;
         return 0;
     }
@@ -739,6 +739,8 @@ static void import_subscription_url(ctl_server_t *s, ctl_client_t *c,
     if (meta.expire) store_set_sub_expire(&s->engine.store, si, meta.expire);
     store_set_sub_meta(&s->engine.store, si, meta.upload, meta.download,
                        meta.total, meta.description, meta.support_url);
+    store_set_sub_extra(&s->engine.store, si, meta.update_interval_h,
+                        meta.refill_date, meta.web_page_url);
     free(blob);
     if (s->persist) s->persist(s->apply_ctx, &s->engine.store);
     snprintf(name, sizeof name, "subscription added, %zu server(s)", added);
@@ -967,7 +969,7 @@ static int connect_with_tunnel_pick(ctl_server_t *s, ctl_client_t *c, int start_
             ctl_action_t stop = { .kind = CTL_ACT_STOP };
             s->apply(s->apply_ctx, &stop);
             s->engine.state = CTL_STATE_IDLE;
-            fprintf(stderr, "senkod: connect aborted (client gone)\n");
+            fprintf(stderr, "legacyrayd: connect aborted (client gone)\n");
             return -1;
         }
 
@@ -1015,7 +1017,7 @@ static int connect_with_tunnel_pick(ctl_server_t *s, ctl_client_t *c, int start_
             ctl_action_t stop = { .kind = CTL_ACT_STOP };
             s->apply(s->apply_ctx, &stop);
             s->engine.state = CTL_STATE_IDLE;
-            fprintf(stderr, "senkod: connect aborted after verify (client gone)\n");
+            fprintf(stderr, "legacyrayd: connect aborted after verify (client gone)\n");
             return -1;
         }
 
@@ -1036,7 +1038,7 @@ static int connect_with_tunnel_pick(ctl_server_t *s, ctl_client_t *c, int start_
         return 0;
     }
 
-    fprintf(stderr, "senkod: connect failed after %zu tries: %s: %s\n",
+    fprintf(stderr, "legacyrayd: connect failed after %zu tries: %s: %s\n",
             tries,
             last_fail.layer[0] ? last_fail.layer : "server",
             last_fail.reason[0] ? last_fail.reason : "unknown");
@@ -1150,7 +1152,7 @@ static void schedule_retry(ctl_server_t *s, long now) {
     long wait = retry_backoff_ms(s->retry_attempts);
     s->retry_at_ms = now + wait;
     s->retry_attempts++;
-    fprintf(stderr, "senkod: redial %d of server %d in %ld ms\n",
+    fprintf(stderr, "legacyrayd: redial %d of server %d in %ld ms\n",
             s->retry_attempts, s->engine.store.selected, wait);
     publish_state(s, CTL_STATE_CONNECTING);
 }
@@ -1194,7 +1196,7 @@ static void check_egress_change(ctl_server_t *s, long now) {
     if (first || !changed) return;
     if (s->engine.state != CTL_STATE_CONNECTED && !s->retry_at_ms) return;
 
-    fprintf(stderr, "senkod: egress moved to %s %s, rebuilding the tunnel\n",
+    fprintf(stderr, "legacyrayd: egress moved to %s %s, rebuilding the tunnel\n",
             name, ip);
 /* a new network is a new chance, not another failed attempt */
     s->retry_attempts = 0;
@@ -1227,14 +1229,14 @@ static void check_scheduled_refresh(ctl_server_t *s, long now) {
     char msg[352];
     if (refresh_subscription(s, pick, msg, sizeof msg) == 0) {
         s->sub_retry_at_ms[pick] = 0;
-        fprintf(stderr, "senkod: scheduled refresh of subscription %d: %s\n",
+        fprintf(stderr, "legacyrayd: scheduled refresh of subscription %d: %s\n",
                 pick, msg);
         return;
     }
 /* a panel that is down must not be pulled once a minute for the rest of the
    day, and the schedule itself cannot tell a broken url from a flaky link */
     s->sub_retry_at_ms[pick] = now + 15 * 60 * 1000;
-    fprintf(stderr, "senkod: scheduled refresh of subscription %d failed: %s\n",
+    fprintf(stderr, "legacyrayd: scheduled refresh of subscription %d failed: %s\n",
             pick, msg);
 }
 
@@ -1306,7 +1308,7 @@ static int refresh_subscription(ctl_server_t *s, int si, char *msg, size_t cap) 
         return -1;
     }
     if (meta.gated)
-        fprintf(stderr, "senkod: taking a device gated feed anyway: %s\n",
+        fprintf(stderr, "legacyrayd: taking a device gated feed anyway: %s\n",
                 meta.gate_reason);
     size_t added = 0;
     if (store_refresh_sub(&s->engine.store, (size_t)si, (const char *)blob, blen,
@@ -1326,9 +1328,16 @@ static int refresh_subscription(ctl_server_t *s, int si, char *msg, size_t cap) 
     store_set_sub_meta(&s->engine.store, (size_t)si, meta.upload,
                        meta.download, meta.total, meta.description,
                        meta.support_url);
+    store_set_sub_extra(&s->engine.store, (size_t)si, meta.update_interval_h,
+                        meta.refill_date, meta.web_page_url);
     if (meta.title[0]) {
         url_t u;
-        if (url_parse(s->engine.store.subs[si].url, &u) == URL_OK)
+/* legacyray: with sub_panel_title on, the panel's name wins over a manual
+   rename; passing the current name as the "untouched" marker forces it */
+        if (s->settings && s->settings->sub_panel_title)
+            store_set_sub_title(&s->engine.store, (size_t)si, meta.title,
+                                s->engine.store.subs[si].name);
+        else if (url_parse(s->engine.store.subs[si].url, &u) == URL_OK)
             store_set_sub_title(&s->engine.store, (size_t)si, meta.title, u.host);
     }
     store_set_sub_refresh(&s->engine.store, (size_t)si,
@@ -1898,6 +1907,11 @@ static void dispatch_line(ctl_server_t *s, ctl_client_t *c,
                 client_write(c, ln, lnn);
             if (ctl_build_subhdr(section, st->subs[section].header,
                                  ln, sizeof ln, &lnn) == CTL_OK)
+                client_write(c, ln, lnn);
+            if (ctl_build_subextra(section, st->subs[section].update_interval_h,
+                                   st->subs[section].refill_date,
+                                   st->subs[section].web_page_url,
+                                   ln, sizeof ln, &lnn) == CTL_OK)
                 client_write(c, ln, lnn);
         }
         if (store_section_count(st) > 0) {

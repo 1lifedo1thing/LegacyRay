@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <unistd.h>
 
-/* a daemon started through senko-kick is a descendant of the app, so it shares
+/* a daemon started through legacyray-kick is a descendant of the app, so it shares
    the app's session and inherits the app's jetsam band. once the app is swiped
    away that band is the first thing the kernel reclaims, and the tunnel dies
    with the ui that started it. the daemon has to declare for itself that it is

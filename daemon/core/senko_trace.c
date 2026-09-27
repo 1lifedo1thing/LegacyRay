@@ -88,7 +88,7 @@ static void trace_line(const char *host, const void *ctx, const session_t *s,
 #ifndef SENKO_RELEASE
     if (s) {
         fprintf(stderr,
-                "senko-trace: t=%lu host=%s ctx=%p event=%s %s "
+                "legacyray-trace: t=%lu host=%s ctx=%p event=%s %s "
                 "app_tx=%llu app_rx=%llu wire_tx=%llu wire_rx=%llu "
                 "ds=%d us=%d us_pend=%d\n",
                 trace_ms(), host_or_dash(host), ctx,
@@ -103,7 +103,7 @@ static void trace_line(const char *host, const void *ctx, const session_t *s,
     }
 #endif
     fprintf(stderr,
-            "senko-trace: t=%lu host=%s ctx=%p event=%s %s ds=%d us=%d us_pend=%d\n",
+            "legacyray-trace: t=%lu host=%s ctx=%p event=%s %s ds=%d us=%d us_pend=%d\n",
             trace_ms(), host_or_dash(host), ctx,
             event ? event : "?", detail ? detail : "", ds, us, us_pend);
     fflush(stderr);

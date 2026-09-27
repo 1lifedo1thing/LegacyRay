@@ -61,6 +61,14 @@ typedef struct {
     int      force_pf_mode;
     int      sub_ignore_gating; /* take the panel's placeholder feed anyway */
     int      trace; /* per connection event lines on the daemon log */
+
+/* legacyray additions */
+    int      rules_enabled;  /* 0 sends everything through the tunnel */
+    int      rules_default;  /* verdict for unmatched names: 0 proxy, 1 direct */
+    int      bypass_lan;     /* lan, link-local and cgnat skip the tunnel */
+    int      sub_panel_title; /* a refresh always takes the panel's name */
+    char     xray_version[16];   /* claimed in the reality session id */
+    char     sub_user_agent[SETTINGS_VALUE_MAX]; /* default subscription UA */
 } daemon_settings_t;
 
 typedef enum {
@@ -70,6 +78,7 @@ typedef enum {
 } settings_status_t;
 
 void daemon_settings_defaults(daemon_settings_t *s);
+
 
 /* the word the control protocol and the config file use for a pinned backend */
 const char *daemon_settings_backend_name(senko_backend_force_t forced);

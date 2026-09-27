@@ -23,7 +23,7 @@ typedef struct {
 int  routing_fwd_up(routing_fwd_t *st, int socks_port,
                     const char *server_ip, const char *server_ips);
 
-/* publish the socks port for senkotlsfix when no firewall tool exists */
+/* publish the socks port for legacyraytlsfix when no firewall tool exists */
 int  routing_fwd_app_proxy_up(routing_fwd_t *st, int socks_port);
 
 void routing_fwd_down(routing_fwd_t *st);

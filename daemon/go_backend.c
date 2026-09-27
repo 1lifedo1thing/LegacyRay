@@ -29,8 +29,8 @@
 
 extern char **environ;
 
-#define GO_CORE SENKO_USR_LIB "/senko-core"
-#define GO_CORE_CONFIG "/var/run/senko-core.json"
+#define GO_CORE SENKO_USR_LIB "/legacyray-core"
+#define GO_CORE_CONFIG "/var/run/legacyray-core.json"
 #define GO_CONFIG_MAX (2 * 1024 * 1024)
 
 static void set_reason(char *reason, size_t cap, const char *value) {
@@ -84,7 +84,7 @@ static int spawn_core(go_backend_t *backend) {
     }
     int rc = posix_spawn(&backend->child, GO_CORE, NULL, NULL, argv, environ);
     unsetenv("XRAY_TUN_FD");
-    /* only the core inherits the tunnel; pfctl, route and senko-kick spawn later */
+    /* only the core inherits the tunnel; pfctl, route and legacyray-kick spawn later */
     (void)fcntl(backend->tun_fd, F_SETFD, old_flags);
     return rc == 0 ? 0 : -1;
 }
@@ -150,7 +150,7 @@ int go_backend_start(go_backend_t *backend, const vl_server_t *server,
         goto fail;
     }
     backend->active = 1;
-    fprintf(stderr, "senkod: go backend on %s, endpoint pinned to %s\n",
+    fprintf(stderr, "legacyrayd: go backend on %s, endpoint pinned to %s\n",
             backend->route.ifname, endpoint_ip);
     return 0;
 

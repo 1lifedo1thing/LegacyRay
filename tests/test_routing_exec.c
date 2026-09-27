@@ -70,8 +70,8 @@ int main(void) {
         ok("pf config generation", rc == ROUTING_OK && pf_len > 0 && pf[pf_len] == '\0');
         ok("pf bounds idle states", strstr(pf, "tcp.established 7200") != NULL);
         if (mode != ROUTING_PF_COMPAT_RDR) {
-            ok("pf keeps local traffic in", strstr(pf, "pass in quick on en0 inet from <senko_bypass>") != NULL);
-            ok("pf keeps local traffic out", strstr(pf, "pass out quick on en0 inet from any to <senko_bypass>") != NULL);
+            ok("pf keeps local traffic in", strstr(pf, "pass in quick on en0 inet from <legacyray_bypass>") != NULL);
+            ok("pf keeps local traffic out", strstr(pf, "pass out quick on en0 inet from any to <legacyray_bypass>") != NULL);
         }
     }
 
@@ -81,8 +81,8 @@ int main(void) {
                              pf, sizeof pf, &pf_len) == ROUTING_OK &&
        strstr(pf, "198.51.100.0/24") != NULL &&
        strstr(pf, "192.0.2.0/25") == NULL &&
-       strstr(pf, "table <senko_block> persist { 192.0.2.0/24, 203.0.113.128/25 }") != NULL);
-    const char *block_rule = strstr(pf, "block return out quick on en0 inet from any to <senko_block>");
+       strstr(pf, "table <legacyray_block> persist { 192.0.2.0/24, 203.0.113.128/25 }") != NULL);
+    const char *block_rule = strstr(pf, "block return out quick on en0 inet from any to <legacyray_block>");
     const char *translation = strstr(pf, "nat on en0");
     ok("pf rejects blocked cidrs before redirect", block_rule && translation && block_rule < translation);
 
@@ -90,14 +90,14 @@ int main(void) {
        routing_pf_conf_rules("203.0.113.10", &policy, ifnames, 1,
                              41001, 41002, ROUTING_PF_COMPAT_RDR,
                              pf, sizeof pf, &pf_len) == ROUTING_OK &&
-       strstr(pf, "<senko_block>") == NULL &&
+       strstr(pf, "<legacyray_block>") == NULL &&
        strstr(pf, "block return out quick on en0 inet from any to { 192.0.2.0/24, 203.0.113.128/25 }") != NULL &&
        strstr(pf, "198.51.100.0/24") != NULL);
     ok("compat pf avoids tables", routing_pf_conf("203.0.113.10", ifnames, 1,
                                                     41001, 41002,
                                                     ROUTING_PF_COMPAT_RDR,
                                                     pf, sizeof pf, &pf_len) == ROUTING_OK &&
-       strstr(pf, "<senko_bypass>") == NULL &&
+       strstr(pf, "<legacyray_bypass>") == NULL &&
        strstr(pf, "inet6") == NULL &&
        strstr(pf, "route-to") == NULL &&
        strstr(pf, "203.0.113.10") != NULL);
@@ -113,8 +113,8 @@ int main(void) {
        routing_pf_anchor_conf_rules("203.0.113.10", &policy, ifnames, 1,
                                     41001, 41002, ROUTING_PF_LEGACY_RDR,
                                     pf, sizeof pf, &pf_len) == ROUTING_OK &&
-       strstr(pf, "table <senko_block>") != NULL &&
-       strstr(pf, "block return out quick on en0 inet from any to <senko_block>") != NULL);
+       strstr(pf, "table <legacyray_block>") != NULL &&
+       strstr(pf, "block return out quick on en0 inet from any to <legacyray_block>") != NULL);
 
     int dynamic_tcp = routing_pick_free_port(0, 0);
     ok("dynamic tcp port", dynamic_tcp > 0 && dynamic_tcp <= 65535);

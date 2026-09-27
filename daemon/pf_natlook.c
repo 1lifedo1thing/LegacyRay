@@ -289,7 +289,7 @@ int pf_natlook_dest(int accepted_fd, const struct sockaddr_in *clientaddr,
         snprintf(client, sizeof client, "?");
     if (!inet_ntop(AF_INET, &local.sin_addr, local_s, sizeof local_s))
         snprintf(local_s, sizeof local_s, "?");
-    fprintf(stderr, "senkod: natlook failed client=%s:%u local=%s:%u pf=%s\n",
+    fprintf(stderr, "legacyrayd: natlook failed client=%s:%u local=%s:%u pf=%s\n",
             client, (unsigned)client_port, local_s, (unsigned)ntohs(local.sin_port),
             pffd >= 0 ? "open" : "unavailable");
     return -1;

@@ -28,6 +28,10 @@ typedef struct {
        the scheduled refresh compares against it, so it has to survive a
        restart the same way the node list does */
     uint64_t last_refresh;
+/* legacyray: panel hints for the subscription screen */
+    uint32_t update_interval_h;
+    uint64_t refill_date;
+    char web_page_url[512];
     int  used;
 } store_sub_t;
 
@@ -107,6 +111,11 @@ void store_set_sub_meta(store_t *st, size_t sub_index, uint64_t upload,
    name on purpose and a refresh must not overwrite their choice */
 store_status_t store_set_sub_title(store_t *st, size_t sub_index,
                                    const char *title, const char *url_host);
+/* legacyray: update interval (hours), traffic refill date and web page */
+store_status_t store_set_sub_extra(store_t *st, size_t sub_index,
+                                   uint32_t update_interval_h,
+                                   uint64_t refill_date,
+                                   const char *web_page_url);
 
 /* set a single optional HTTP request header for subscription refreshes */
 store_status_t store_set_sub_header(store_t *st, size_t sub_index,

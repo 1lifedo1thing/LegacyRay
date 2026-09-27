@@ -41,7 +41,7 @@ static void activate_pending_direct_if_drained(session_t *s) {
             s->vision_upstream_direct_mark_transport = 0;
         }
         s->vision_upstream_direct = 1;
-        fprintf(stderr, "senkod: vision upstream direct active\n");
+        fprintf(stderr, "legacyrayd: vision upstream direct active\n");
         senko_trace_sess(s, "upstream_direct_active", "pending drained");
     }
 }
@@ -52,14 +52,14 @@ static void request_upstream_direct(session_t *s, const char *why, int mark_tran
         if (mark_transport && s->vt->raw_write)
             (void)s->vt->raw_write(s->th, NULL, 0);
         s->vision_upstream_direct = 1;
-        fprintf(stderr, "senkod: vision upstream direct active: %s\n",
+        fprintf(stderr, "legacyrayd: vision upstream direct active: %s\n",
                 why ? why : "direct");
         senko_trace_sess(s, "upstream_direct_active", why);
     } else {
         if (mark_transport)
             s->vision_upstream_direct_mark_transport = 1;
         s->vision_upstream_direct_pending = 1;
-        fprintf(stderr, "senkod: vision upstream direct pending: %s\n",
+        fprintf(stderr, "legacyrayd: vision upstream direct pending: %s\n",
                 why ? why : "direct");
         senko_trace_sess(s, "upstream_direct_pending", why);
     }
@@ -85,7 +85,7 @@ static size_t push_remote_mode(session_t *s, const uint8_t *buf, size_t len, int
             break;
         }
         senko_trace_sess(s, "SESS_ERROR", raw ? "push_remote_raw" : "push_remote");
-        fprintf(stderr, "senkod: session remote write failed (%s)\n",
+        fprintf(stderr, "legacyrayd: session remote write failed (%s)\n",
                 raw ? "raw" : "framed");
         s->state = SESS_ERROR;
         break;
@@ -258,7 +258,7 @@ static void deliver_client(session_t *s, const uint8_t *buf, size_t len) {
         size_t took = q_append(s->to_client, &s->to_client_len,
                                sizeof s->to_client, buf, len);
         if (took < len) {
-            fprintf(stderr, "senkod: to_client overflow, dropped %zu bytes "
+            fprintf(stderr, "legacyrayd: to_client overflow, dropped %zu bytes "
                     "(would corrupt downloads)\n", len - took);
             s->state = SESS_ERROR;
             return;
@@ -287,13 +287,13 @@ static void deliver_client(session_t *s, const uint8_t *buf, size_t len) {
     if (an > 0) vision_filter_tls(&s->vision_traffic, app, an);
     if (dir) {
         s->vision_downstream_direct = 1;
-        fprintf(stderr, "senkod: vision downstream direct\n");
+        fprintf(stderr, "legacyrayd: vision downstream direct\n");
         senko_trace_sess(s, "downstream_direct", "vision CMD_DIRECT");
     }
     size_t took = q_append(s->to_client, &s->to_client_len,
                            sizeof s->to_client, app, an);
     if (took < an) {
-        fprintf(stderr, "senkod: to_client overflow after vision, dropped %zu\n",
+        fprintf(stderr, "legacyrayd: to_client overflow after vision, dropped %zu\n",
                 an - took);
         s->state = SESS_ERROR;
         return;
@@ -622,7 +622,7 @@ sess_status_t session_pump_remote(session_t *s) {
 
     if (s->state == SESS_VISION_FIRST) {
         if (now_ms() < s->vision_first_deadline_ms) return SESS_OK;
-        fprintf(stderr, "senkod: vision first bootstrap timeout fired\n");
+        fprintf(stderr, "legacyrayd: vision first bootstrap timeout fired\n");
         if (send_vision_first(s, NULL, 0, NULL) != SESS_OK) return SESS_ERR;
     }
 
@@ -648,14 +648,14 @@ sess_status_t session_pump_remote(session_t *s) {
 
         if (n == TRANSPORT_WANT_READ || n == TRANSPORT_WANT_WRITE) return SESS_OK;
         if (n == TRANSPORT_EOF) {
-            fprintf(stderr, "senkod: transport eof in session state=%d queued=%zu\n",
+            fprintf(stderr, "legacyrayd: transport eof in session state=%d queued=%zu\n",
                     (int)s->state, s->to_client_len);
             fail_pending_socks(s);
             s->state = SESS_CLOSED;
             return SESS_OK;
         }
         if (n < 0) {
-            fprintf(stderr, "senkod: transport read error in session state=%d rc=%d\n",
+            fprintf(stderr, "legacyrayd: transport read error in session state=%d rc=%d\n",
                     (int)s->state, n);
             fail_pending_socks(s);
             s->state = SESS_ERROR;
@@ -673,7 +673,7 @@ sess_status_t session_pump_remote(session_t *s) {
                 vc_status_t vs = vless_conn_feed_response(&s->u.vc, tmp, (size_t)n, &app_off);
                 if (vs == VC_NEED_MORE) return SESS_OK; /* retain a partial header */
                 if (vs != VC_OK) {
-                    fprintf(stderr, "senkod: vless response parse failed rc=%d bytes=%d\n",
+                    fprintf(stderr, "legacyrayd: vless response parse failed rc=%d bytes=%d\n",
                             (int)vs, n);
                     fail_pending_socks(s);
                     s->state = SESS_ERROR;
@@ -682,7 +682,7 @@ sess_status_t session_pump_remote(session_t *s) {
 /* deliver the response tail as application data after the header */
                 s->state = SESS_RELAY;
                 flush_pending_socks_ok(s);
-                fprintf(stderr, "senkod: vless response ok app_tail=%zu\n",
+                fprintf(stderr, "legacyrayd: vless response ok app_tail=%zu\n",
                         (size_t)n - app_off);
                 senko_trace_sess(s, "relay_established", "vless");
                 deliver_client(s, tmp + app_off, (size_t)n - app_off);
@@ -762,7 +762,7 @@ sess_status_t session_pump_remote(session_t *s) {
                 feed = NULL;
                 feed_len = 0;
                 if (fr == SS_ERR_BAD_TAG || fr == SS_ERR_CRYPTO) {
-                    fprintf(stderr, "senkod: shadowsocks decrypt failed rc=%d\n", fr);
+                    fprintf(stderr, "legacyrayd: shadowsocks decrypt failed rc=%d\n", fr);
                     fail_pending_socks(s);
                     s->state = SESS_ERROR;
                     return SESS_ERR;

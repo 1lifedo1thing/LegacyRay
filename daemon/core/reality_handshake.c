@@ -11,6 +11,21 @@
 #include "tls13_kdf.h"
 #include "tls13_handshake.h"
 #include "tls13_record.h"
+
+/* legacyray: the xray version this client claims inside the session id */
+static uint8_t g_reality_version[3] = { 26, 7, 28 };
+
+int reality_set_client_version(const char *text) {
+    unsigned a = 0, b = 0, c = 0;
+    char tail = 0;
+    if (!text || sscanf(text, "%u.%u.%u%c", &a, &b, &c, &tail) != 3 ||
+        a > 255 || b > 255 || c > 255)
+        return -1;
+    g_reality_version[0] = (uint8_t)a;
+    g_reality_version[1] = (uint8_t)b;
+    g_reality_version[2] = (uint8_t)c;
+    return 0;
+}
 #include "b64.h"
 
 #include <errno.h>
@@ -75,10 +90,10 @@ static const char *tls_alert_description(uint8_t desc) {
 
 static void log_tls_alert(const char *where, const uint8_t *body, size_t len) {
     if (len < 2) {
-        fprintf(stderr, "senkod: REALITY %s: truncated alert (%zu bytes)\n", where, len);
+        fprintf(stderr, "legacyrayd: REALITY %s: truncated alert (%zu bytes)\n", where, len);
         return;
     }
-    fprintf(stderr, "senkod: REALITY %s: alert level=%u %s (%u)\n",
+    fprintf(stderr, "legacyrayd: REALITY %s: alert level=%u %s (%u)\n",
             where, body[0], tls_alert_description(body[1]), body[1]);
 }
 
@@ -515,10 +530,10 @@ fail:
         char stamp[32];
         struct tm tm_buf;
         if (gmtime_r(&now, &tm_buf) && strftime(stamp, sizeof stamp, "%Y-%m-%d %H:%M:%S", &tm_buf))
-            fprintf(stderr, "senkod: REALITY %s failed (%s) at device clock %s UTC\n",
+            fprintf(stderr, "legacyrayd: REALITY %s failed (%s) at device clock %s UTC\n",
                     stage, rh_status_name(e), stamp);
         else
-            fprintf(stderr, "senkod: REALITY %s failed (%s)\n", stage, rh_status_name(e));
+            fprintf(stderr, "legacyrayd: REALITY %s failed (%s)\n", stage, rh_status_name(e));
     }
     if (tr.ctx) tls13_transcript_free(&tr);
     if (c) free(c);
@@ -626,7 +641,7 @@ static int rh_queue_key_update_reply(rh_conn_t *c) {
 /* rotate write keys only after the reply is queued */
     if (rh_update_write_keys(c) != 0) return TRANSPORT_ERR;
     c->ku_reply_pending = 0;
-    fprintf(stderr, "senkod: reality key_update reply sent\n");
+    fprintf(stderr, "legacyrayd: reality key_update reply sent\n");
     return 0;
 }
 
@@ -643,7 +658,7 @@ static int rh_handle_post_hs(rh_conn_t *c, const uint8_t *msg, size_t len) {
         if (type == HS_KEY_UPDATE) {
             if (mlen < 1) return -1;
             if (rh_update_read_keys(c) != 0) return -1;
-            fprintf(stderr, "senkod: reality key_update applied (read)\n");
+            fprintf(stderr, "legacyrayd: reality key_update applied (read)\n");
             if (body[0] == 1) /* update_requested */
                 c->ku_reply_pending = 1;
         }
@@ -705,7 +720,7 @@ static int rh_enter_read_plain(rh_conn_t *c, uint8_t type,
     if (body_len) memcpy(c->rxbuf + 5, body, body_len);
     c->rxlen = 5 + body_len;
     c->rxoff = 0;
-    fprintf(stderr, "senkod: reality splice plain seq=%llu rlen=%zu\n",
+    fprintf(stderr, "legacyrayd: reality splice plain seq=%llu rlen=%zu\n",
             (unsigned long long)c->s_app_seq, body_len);
     return rh_read_plain(c, buf, len);
 }
@@ -760,7 +775,7 @@ static int rh_read(void *handle, uint8_t *buf, size_t len) {
 /* accept bare origin bytes only after authenticated application traffic */
             if (c->s_app_seq > 0)
                 return rh_enter_read_plain(c, type, rec, rlen, buf, len);
-            fprintf(stderr, "senkod: reality aead open fail seq=%llu rlen=%zu\n",
+            fprintf(stderr, "legacyrayd: reality aead open fail seq=%llu rlen=%zu\n",
                     (unsigned long long)c->s_app_seq, rlen);
             return TRANSPORT_ERR;
         }
@@ -865,10 +880,12 @@ static void *rh_open(int fd, const transport_tls_cfg_t *cfg) {
 
 /* REALITY servers may enforce a minimum wire client version before accepting
    the encrypted session token.  The old 1.8.0 marker is rejected by current
-   deployments even though the key and ClientHello are otherwise valid. */
-    p.version[0] = 26;
-    p.version[1] = 7;
-    p.version[2] = 28;
+   deployments even though the key and ClientHello are otherwise valid.
+   legacyray: the marker is a setting (xray_version), for servers that pin a
+   window the default falls outside of */
+    p.version[0] = g_reality_version[0];
+    p.version[1] = g_reality_version[1];
+    p.version[2] = g_reality_version[2];
 
 /* map the fingerprint and generate firefox's decoy point in crypto code */
     p.fp = TLS_FP_CHROME;
@@ -883,7 +900,7 @@ static void *rh_open(int fd, const transport_tls_cfg_t *cfg) {
                  strcmp(cfg->fingerprint, "randomized") == 0) p.fp = TLS_FP_RANDOMIZED;
         else {
 /* silent fallback hid broken fp= values; log once per open */
-            fprintf(stderr, "senkod: unknown fp=%s, using chrome\n",
+            fprintf(stderr, "legacyrayd: unknown fp=%s, using chrome\n",
                     cfg->fingerprint);
             p.fp = TLS_FP_CHROME;
         }
@@ -928,9 +945,9 @@ static void *rh_open(int fd, const transport_tls_cfg_t *cfg) {
     int pr = poll(&pfd, 1, 4000);
     if (pr <= 0) {
         if (pr == 0)
-            fprintf(stderr, "senkod: reality tcp connect timed out\n");
+            fprintf(stderr, "legacyrayd: reality tcp connect timed out\n");
         else
-            fprintf(stderr, "senkod: reality tcp connect wait failed: errno=%d\n",
+            fprintf(stderr, "legacyrayd: reality tcp connect wait failed: errno=%d\n",
                     errno);
         fcntl(fd, F_SETFL, flags);
         return NULL;
@@ -940,7 +957,7 @@ static void *rh_open(int fd, const transport_tls_cfg_t *cfg) {
     socklen_t err_len = sizeof err_code;
     if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err_code, &err_len) < 0 || err_code != 0) {
         int saved_errno = errno;
-        fprintf(stderr, "senkod: reality tcp connect failed: so_error=%d errno=%d\n",
+        fprintf(stderr, "legacyrayd: reality tcp connect failed: so_error=%d errno=%d\n",
                 err_code, saved_errno);
         fcntl(fd, F_SETFL, flags);
         return NULL;
@@ -950,7 +967,7 @@ static void *rh_open(int fd, const transport_tls_cfg_t *cfg) {
     void *h = reality_handshake_open(fd, &p, &err);
     if (!h) {
         int saved_errno = errno;
-        fprintf(stderr, "senkod: reality handshake failed: %s (%d), errno=%d\n",
+        fprintf(stderr, "legacyrayd: reality handshake failed: %s (%d), errno=%d\n",
                 rh_status_name(err), (int)err, saved_errno);
     }
 

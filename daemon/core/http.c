@@ -174,7 +174,47 @@ static http_status_t consume_line(http_parser_t *p) {
         memcpy(p->announce, v, n);
         p->announce[n] = '\0';
         p->have_announce = 1;
-    } else if (hdr_is(p->line, "profile-web-page-url:") ||
+    } else if (hdr_is(p->line, "profile-web-page-url:")) {
+        /* legacyray: the web page is kept apart from the support link; the
+           support slot still takes it when the panel sends nothing better */
+        const char *v = skip_ws(p->line + 21);
+        size_t n = strlen(v);
+        if (n >= sizeof p->web_page_url) n = sizeof p->web_page_url - 1;
+        memcpy(p->web_page_url, v, n);
+        p->web_page_url[n] = '\0';
+        p->have_web_page_url = 1;
+        if (!p->have_subscription_support_url) {
+            if (n >= sizeof p->subscription_support_url)
+                n = sizeof p->subscription_support_url - 1;
+            memcpy(p->subscription_support_url, v, n);
+            p->subscription_support_url[n] = '\0';
+        }
+    } else if (hdr_is(p->line, "profile-update-interval:")) {
+        const char *v = skip_ws(p->line + 24);
+        unsigned long hours = 0;
+        int any = 0;
+        while (*v >= '0' && *v <= '9' && hours < 100000ul) {
+            hours = hours * 10ul + (unsigned long)(*v++ - '0');
+            any = 1;
+        }
+        if (any && hours > 0 && hours <= 8760ul) {
+            p->update_interval_h = (uint32_t)hours;
+            p->have_update_interval = 1;
+        }
+    } else if (hdr_is(p->line, "subscription-refill-date:")) {
+        const char *v = skip_ws(p->line + 25);
+        unsigned long long when = 0;
+        int any = 0;
+        while (*v >= '0' && *v <= '9' && when < 100000000000000ull) {
+            when = when * 10ull + (unsigned long long)(*v++ - '0');
+            any = 1;
+        }
+        if (when > 100000000000ull) when /= 1000ull; /* milliseconds */
+        if (any && when > 0) {
+            p->refill_date = (uint64_t)when;
+            p->have_refill_date = 1;
+        }
+    } else if (hdr_is(p->line, "support-url:") ||
                hdr_is(p->line, "subscription-support-url:")) {
         const char *v = strchr(p->line, ':');
         size_t n;

@@ -6,8 +6,8 @@
 #include <unistd.h>
 
 static const char k_state_path[] =
-    "/var/mobile/Library/Preferences/com.senko.status.state";
-static const char k_notify_name[] = "com.senko.status.changed";
+    "/var/mobile/Library/Preferences/com.legacyray.status.state";
+static const char k_notify_name[] = "com.legacyray.status.changed";
 #endif
 
 void status_set(int enabled) {

@@ -43,10 +43,10 @@ cp "${DEB}" "${WORK}/pkg.deb"
     exit 1
   fi
 
-  [ -x "${payload}/usr/bin/senkod" ] || { echo "missing senkod" >&2; exit 1; }
-  [ -x "${payload}/usr/bin/senkoawgd" ] || { echo "missing senkoawgd" >&2; exit 1; }
+  [ -x "${payload}/usr/bin/legacyrayd" ] || { echo "missing legacyrayd" >&2; exit 1; }
+  [ -x "${payload}/usr/bin/legacyrayawgd" ] || { echo "missing legacyrayawgd" >&2; exit 1; }
   awg_bins="$(find "${payload}/usr/bin" -maxdepth 1 -type f -name '*awgd' -print)"
-  [ "${awg_bins}" = "${payload}/usr/bin/senkoawgd" ] || {
+  [ "${awg_bins}" = "${payload}/usr/bin/legacyrayawgd" ] || {
     echo "stale awg daemon binary" >&2
     exit 1
   }
@@ -54,19 +54,19 @@ cp "${DEB}" "${WORK}/pkg.deb"
     echo "redsocks must not be packaged" >&2
     exit 1
   }
-  [ -f "${payload}/usr/lib/senkotlsfix.dylib" ] || { echo "missing bundled tlsfix" >&2; exit 1; }
-  # the app can only ever ask a setuid senko-kick to reach the root daemon; a
+  [ -f "${payload}/usr/lib/legacyraytlsfix.dylib" ] || { echo "missing bundled tlsfix" >&2; exit 1; }
+  # the app can only ever ask a setuid legacyray-kick to reach the root daemon; a
   # deb built without that bit installs cleanly and then fails on every
   # launch with no way for the user to tell why. read the mode tar actually
   # stored rather than what extracting here reproduces: a sandbox that
   # itself disallows setting setuid on extraction would otherwise fail this
   # check on a correctly packaged deb
-  kick_entry="$(tar -tvf data.tar.gz | grep -F "${relroot}/usr/bin/senko-kick")"
+  kick_entry="$(tar -tvf data.tar.gz | grep -F "${relroot}/usr/bin/legacyray-kick")"
   kick_perm="${kick_entry%% *}"
   case "${kick_perm}" in
     -rws*) ;;
     *)
-      echo "senko-kick packaged without setuid, tar entry: ${kick_entry:-<not found>}" >&2
+      echo "legacyray-kick packaged without setuid, tar entry: ${kick_entry:-<not found>}" >&2
       exit 1
       ;;
   esac
@@ -75,13 +75,13 @@ cp "${DEB}" "${WORK}/pkg.deb"
     exit 1
   }
 
-  for bin in "${payload}/usr/bin/senkod" "${payload}/usr/bin/senkoctl" "${payload}/usr/bin/senkoawgd" \
-             "${payload}/usr/lib/senkotlsfix.dylib" \
-             "${payload}/usr/lib/senkostatus.dylib" \
+  for bin in "${payload}/usr/bin/legacyrayd" "${payload}/usr/bin/legacyrayctl" "${payload}/usr/bin/legacyrayawgd" \
+             "${payload}/usr/lib/legacyraytlsfix.dylib" \
+             "${payload}/usr/lib/legacyraystatus.dylib" \
              "${payload}/Applications/Senko.app/senko"; do
     while IFS= read -r dep; do
       case "${dep}" in
-        /usr/lib/*|/System/Library/Frameworks/*|/var/jb/usr/lib/senkotlsfix.dylib|/var/jb/usr/lib/senkostatus.dylib) ;;
+        /usr/lib/*|/System/Library/Frameworks/*|/var/jb/usr/lib/legacyraytlsfix.dylib|/var/jb/usr/lib/legacyraystatus.dylib) ;;
         *) echo "non-system runtime dependency in ${bin}: ${dep}" >&2; exit 1 ;;
       esac
     done < <("${TC}/otool" -L "${bin}" | awk '/^[[:space:]]/ { print $1 }')

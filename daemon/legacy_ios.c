@@ -47,6 +47,7 @@ int senko_ios_major_from_darwin(const char *release) {
        which share every branch this answer selects */
     switch (darwin) {
         case 0:  return 0;
+        case 10: return 4; /* legacyray: ios 4.x */
         case 11: return 5;
         case 12: return 5;
         case 13: return 6;

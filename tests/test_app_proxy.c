@@ -1,7 +1,7 @@
 #define _DEFAULT_SOURCE
 
-#include "../senkotlsfix/stl_proxy.h"
-#include "../senkotlsfix/fishhook.h"
+#include "../tweaks/tlsfix/stl_proxy.h"
+#include "../tweaks/tlsfix/fishhook.h"
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -14,7 +14,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define STATE_PATH "/tmp/senko-c-proxy-test"
+#define STATE_PATH "/tmp/legacyray-c-proxy-test"
 
 static int fails;
 static int listener;

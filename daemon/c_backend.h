@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-/* the in-process C core: senkod terminates the redirected connections itself
+/* the in-process C core: legacyrayd terminates the redirected connections itself
    and carries them over vless. it needs no utun, so it is the only backend
    that runs on every supported system. the go backend replaces it wherever a
    utun tunnel is available */
@@ -45,7 +45,7 @@ void c_backend_stop(c_backend_t *cb, loop_t *loop);
 /* the transparent listener carries traffic in every mode but the connect hook */
 int  c_backend_uses_tproxy(const c_backend_t *cb);
 
-/* keep senkod's own probes off the redirect so they measure the real path */
+/* keep legacyrayd's own probes off the redirect so they measure the real path */
 void c_backend_bypass_add_ipv4(c_backend_t *cb, const char *ip);
 
 /* drop rules a crash left behind before installing a new catch-all */

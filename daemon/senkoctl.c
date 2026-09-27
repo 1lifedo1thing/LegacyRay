@@ -12,7 +12,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define DEFAULT_SOCK "/var/tmp/senkod.sock"
+#define DEFAULT_SOCK "/var/tmp/legacyrayd.sock"
 
 /* keep reading streamed catalog and fetch records until a terminal line */
 static int reply_complete(const char *buf, size_t len) {
@@ -250,7 +250,7 @@ static int run_fetch(const char *sock, const char *url) {
             return 0;
         }
 
-        fprintf(stderr, "senkoctl: unexpected fetch reply\n");
+        fprintf(stderr, "legacyrayctl: unexpected fetch reply\n");
         close(fd);
         return 2;
     }
@@ -333,7 +333,7 @@ int main(int argc, char **argv) {
         if (i >= argc) { usage(argv[0]); return 2; }
         char url[1100];
         if (join_args(argv, i, argc, url, sizeof url) != 0) {
-            fprintf(stderr, "senkoctl: arguments too long\n");
+            fprintf(stderr, "legacyrayctl: arguments too long\n");
             return 2;
         }
         return run_fetch(sock, url);
@@ -393,14 +393,14 @@ int main(int argc, char **argv) {
         if (i + 1 >= argc) { usage(argv[0]); return 2; }
         char rest[1100];
         if (join_args(argv, i, argc, rest, sizeof rest) != 0) {
-            fprintf(stderr, "senkoctl: arguments too long\n"); return 2;
+            fprintf(stderr, "legacyrayctl: arguments too long\n"); return 2;
         }
         snprintf(line, sizeof line, "ADDSUB %s\n", rest);
     } else if (strcmp(cmd, "raw") == 0) {
         if (i >= argc) { usage(argv[0]); return 2; }
         char rest[1100];
         if (join_args(argv, i, argc, rest, sizeof rest) != 0) {
-            fprintf(stderr, "senkoctl: arguments too long\n"); return 2;
+            fprintf(stderr, "legacyrayctl: arguments too long\n"); return 2;
         }
         snprintf(line, sizeof line, "%s\n", rest);
     } else {
@@ -424,7 +424,7 @@ int main(int argc, char **argv) {
     ssize_t n = talk_ex(sock, line, strlen(line), buf, sizeof buf,
                         timeout_sec, done, &timed_out);
     if (n < 0) {
-        fprintf(stderr, "senkoctl: cannot reach daemon at %s (%s)\n",
+        fprintf(stderr, "legacyrayctl: cannot reach daemon at %s (%s)\n",
                 sock, strerror(errno));
         return 2;
     }
@@ -435,7 +435,7 @@ int main(int argc, char **argv) {
     if (timed_out) {
 /* the daemon may still be working (a refresh keeps running after the client
    gives up), so this is a client-side timeout, not proof of failure */
-        fprintf(stderr, "senkoctl: timed out after %ds waiting for the daemon's reply\n",
+        fprintf(stderr, "legacyrayctl: timed out after %ds waiting for the daemon's reply\n",
                 timeout_sec);
         return 2;
     }

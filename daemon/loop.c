@@ -350,7 +350,7 @@ static void drop_conn(loop_t *lp, loop_conn_t *c) {
         c->open_vt->shutdown(c->th);
     session_trace_close(&c->sess, "drop");
     if (c->sess.state == SESS_ERROR)
-        fprintf(stderr, "senkod: dropping errored session\n");
+        fprintf(stderr, "legacyrayd: dropping errored session\n");
     if (c->th && c->open_vt) c->open_vt->close(c->th);
     if (c->remote_fd >= 0) close(c->remote_fd);
     if (c->local_fd >= 0)  close(c->local_fd);
@@ -399,7 +399,7 @@ static void reap_opening_conns(loop_t *lp) {
 
         if (cancelled || !th) {
             if (!cancelled && !th)
-                fprintf(stderr, "senkod: transport open failed (tproxy=%d)\n",
+                fprintf(stderr, "legacyrayd: transport open failed (tproxy=%d)\n",
                         c->transparent);
             if (c->local_fd >= 0) close(c->local_fd);
             if (th && c->open_vt) c->open_vt->close(th);
@@ -625,12 +625,12 @@ static void accept_one(loop_t *lp) {
 
     loop_conn_t *c = alloc_conn(lp);
     if (!c) {
-        fprintf(stderr, "senkod: drop accept: conn cap\n");
+        fprintf(stderr, "legacyrayd: drop accept: conn cap\n");
         close(cfd);
         return;
     }
     if (lp->nopening >= LOOP_MAX_OPENING) {
-        fprintf(stderr, "senkod: drop accept: opening cap %zu\n", lp->nopening);
+        fprintf(stderr, "legacyrayd: drop accept: opening cap %zu\n", lp->nopening);
         clear_conn_slot(c);
         close(cfd);
         return;
@@ -680,12 +680,12 @@ static void accept_tproxy_one(loop_t *lp) {
 
     loop_conn_t *c = alloc_conn(lp);
     if (!c) {
-        fprintf(stderr, "senkod: drop tproxy: conn cap\n");
+        fprintf(stderr, "legacyrayd: drop tproxy: conn cap\n");
         close(cfd);
         return;
     }
     if (lp->nopening >= LOOP_MAX_OPENING) {
-        fprintf(stderr, "senkod: drop tproxy: opening cap %zu\n", lp->nopening);
+        fprintf(stderr, "legacyrayd: drop tproxy: opening cap %zu\n", lp->nopening);
         clear_conn_slot(c);
         close(cfd);
         return;

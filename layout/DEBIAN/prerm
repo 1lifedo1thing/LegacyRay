@@ -1,0 +1,34 @@
+#!/bin/sh
+# tear the tunnel down while the binaries that know how still exist: pf rules,
+# routes and the utun belong to the daemon
+PLIST=/Library/LaunchDaemons/com.legacyray.daemon.plist
+LAUNCHCTL=/bin/launchctl
+[ -x "$LAUNCHCTL" ] || LAUNCHCTL=/usr/bin/launchctl
+
+if [ "${SENKO_UPDATE:-0}" != "1" ]; then
+  if [ -x /usr/bin/legacyray-kick ]; then
+    status="$(/usr/bin/legacyray-kick --awg-status 2>/dev/null || true)"
+    case "$status" in
+      connecting*|connected*)
+        if [ "$1" = upgrade ] && [ -s /var/run/legacyrayawgd.config ]; then
+          sed -n '1p' /var/run/legacyrayawgd.config > /var/run/legacyrayawgd.upgrade 2>/dev/null || true
+        fi
+        /usr/bin/legacyray-kick --awg-stop >/dev/null 2>&1 || true ;;
+    esac
+  fi
+  if [ -S /var/tmp/legacyrayd.sock ] && [ -x /usr/bin/legacyrayctl ]; then
+    /usr/bin/legacyrayctl DISCONNECT >/dev/null 2>&1 || true
+  fi
+  "$LAUNCHCTL" unload "$PLIST" >/dev/null 2>&1 || true
+  killall -TERM legacyrayd >/dev/null 2>&1 || true
+  sleep 1
+  killall -9 legacyrayd legacyrayawgd >/dev/null 2>&1 || true
+  if [ -f /var/run/legacyray-pf.conf ]; then
+    for pfctl in /sbin/pfctl /usr/sbin/pfctl; do
+      [ -x "$pfctl" ] && { "$pfctl" -q -F all >/dev/null 2>&1 || true; break; }
+    done
+    rm -f /var/run/legacyray-pf.conf
+  fi
+fi
+printf '0\n' > /var/mobile/Library/Preferences/com.legacyray.status.state 2>/dev/null || true
+exit 0

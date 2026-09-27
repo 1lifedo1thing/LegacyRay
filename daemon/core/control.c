@@ -630,6 +630,18 @@ static int ctl_pct_encode(const char *src, char *dst, size_t cap) {
     return 0;
 }
 
+ctl_status_t ctl_build_subextra(int idx, uint32_t update_interval_h,
+                                uint64_t refill_date, const char *web_page_url,
+                                char *buf, size_t cap, size_t *n) {
+    char web[1536];
+    if (!buf || !web_page_url) return CTL_ERR_ARG;
+    if (ctl_pct_encode(web_page_url, web, sizeof web) != 0) return CTL_ERR_BUF;
+    return finish(snprintf(buf, cap, "SUBEXTRA %d %u %llu %s\n", idx,
+                           (unsigned)update_interval_h,
+                           (unsigned long long)refill_date,
+                           web[0] ? web : "-"), cap, n);
+}
+
 ctl_status_t ctl_build_subhdr(int idx, const char *header,
                               char *buf, size_t cap, size_t *n) {
     if (!buf || !header) return CTL_ERR_ARG;

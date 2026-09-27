@@ -27,7 +27,7 @@ static volatile sig_atomic_t g_stop;
 
 #define AWG_REKEY_INTERVAL_MS 120000L
 #define AWG_REKEY_RETRY_MS 5000L
-#define AWG_STATUS_PATH "/var/run/senkoawgd.status"
+#define AWG_STATUS_PATH "/var/run/legacyrayawgd.status"
 
 static void on_signal(int signal_number) {
     (void)signal_number;
@@ -103,15 +103,15 @@ static int run_tunnel(const awg_config_t *cfg, int timeout_ms) {
     int tun_fd = awg_utun_open(ifname, sizeof ifname);
     if (tun_fd < 0) {
         write_status("error utun unavailable");
-        fprintf(stderr, "senkoawgd: utun unavailable (%s)\n", strerror(errno));
+        fprintf(stderr, "legacyrayawgd: utun unavailable (%s)\n", strerror(errno));
         return 1;
     }
-    fprintf(stderr, "senkoawgd: created %s\n", ifname);
+    fprintf(stderr, "legacyrayawgd: created %s\n", ifname);
     char endpoint[64], gateway[64];
     int udp_fd = open_endpoint(cfg, endpoint, sizeof endpoint);
     if (udp_fd < 0) {
         write_status("error endpoint udp connect failed");
-        fprintf(stderr, "senkoawgd: endpoint udp connect failed\n");
+        fprintf(stderr, "legacyrayawgd: endpoint udp connect failed\n");
         close(tun_fd);
         return 1;
     }
@@ -126,14 +126,14 @@ static int run_tunnel(const awg_config_t *cfg, int timeout_ms) {
         char status[160];
         snprintf(status, sizeof status, "error %s", reason);
         write_status(status);
-        fprintf(stderr, "senkoawgd: %s\n", reason);
+        fprintf(stderr, "legacyrayawgd: %s\n", reason);
         close(udp_fd);
         close(tun_fd);
         return 1;
     }
     if (awg_route_gateway_for_endpoint(endpoint, gateway, sizeof gateway) != 0) {
         write_status("error physical gateway lookup failed");
-        fprintf(stderr, "senkoawgd: physical gateway lookup failed\n");
+        fprintf(stderr, "legacyrayawgd: physical gateway lookup failed\n");
         OPENSSL_cleanse(&tunnel, sizeof tunnel);
         close(udp_fd); close(tun_fd);
         return 1;
@@ -142,7 +142,7 @@ static int run_tunnel(const awg_config_t *cfg, int timeout_ms) {
     if (awg_route_plan_build(cfg, ifname, endpoint, gateway, &route_plan) != 0 ||
         awg_route_plan_up(&route_plan) != 0) {
         write_status("error route setup failed");
-        fprintf(stderr, "senkoawgd: route setup failed\n");
+        fprintf(stderr, "legacyrayawgd: route setup failed\n");
         OPENSSL_cleanse(&tunnel, sizeof tunnel);
         close(udp_fd); close(tun_fd);
         return 1;
@@ -153,7 +153,7 @@ static int run_tunnel(const awg_config_t *cfg, int timeout_ms) {
     static uint8_t framed[AWG_DATAGRAM_MAX + 4];
     static uint8_t wire[AWG_DATAGRAM_MAX];
     static uint8_t inner[AWG_DATAGRAM_MAX];
-    fprintf(stderr, "senkoawgd: linked %s to %s:%u\n",
+    fprintf(stderr, "legacyrayawgd: linked %s to %s:%u\n",
             ifname, cfg->endpoint_host, cfg->endpoint_port);
     write_status("connected");
     status_set(1);
@@ -222,7 +222,7 @@ static int run_tunnel(const awg_config_t *cfg, int timeout_ms) {
                 last_tx_ms = now_ms;
             } else {
                 OPENSSL_cleanse(&refreshed, sizeof refreshed);
-                fprintf(stderr, "senkoawgd: rekey deferred: %s\n", reason);
+                fprintf(stderr, "legacyrayawgd: rekey deferred: %s\n", reason);
             }
         }
     }
@@ -251,14 +251,14 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "--route-probe") == 0) {
         char detail[160];
         int rc = awg_pfroute_probe_get4(argv[2], detail, sizeof detail);
-        fprintf(stderr, "senkoawgd: route probe %s\n", detail);
+        fprintf(stderr, "legacyrayawgd: route probe %s\n", detail);
         return rc == 0 ? 0 : 1;
     }
     if (argc < 3) { usage(argv[0]); return 2; }
     if (strcmp(argv[1], "--route-mutation-probe") == 0) {
         if (argc < 4) { usage(argv[0]); return 2; }
         char detail[160]; int rc = awg_pfroute_probe_host4(argv[2], argv[3], detail, sizeof detail);
-        fprintf(stderr, "senkoawgd: route mutation %s\n", detail);
+        fprintf(stderr, "legacyrayawgd: route mutation %s\n", detail);
         return rc == 0 ? 0 : 1;
     }
     int timeout_ms = argc > 3 ? atoi(argv[3]) : 5000;
@@ -269,7 +269,7 @@ int main(int argc, char **argv) {
         if (strcmp(argv[1], "--validate") == 0)
             printf("ERR config rejected: %s\n", reason);
         else
-            fprintf(stderr, "senkoawgd: config rejected: %s\n", reason);
+            fprintf(stderr, "legacyrayawgd: config rejected: %s\n", reason);
         return 2;
     }
     if (strcmp(argv[1], "--validate") == 0) {
@@ -283,7 +283,7 @@ int main(int argc, char **argv) {
         int ok = fd >= 0 && awg_route_plan_for_interface(&cfg, ifname, &plan) == 0 &&
                  awg_route_interface_up(&plan) == 0;
         if (fd >= 0) close(fd);
-        fprintf(stderr, "senkoawgd: interface probe %s\n", ok ? "ok" : "failed");
+        fprintf(stderr, "legacyrayawgd: interface probe %s\n", ok ? "ok" : "failed");
         return ok ? 0 : 1;
     }
     if (strcmp(argv[1], "--net-route-probe") == 0) {
@@ -296,7 +296,7 @@ int main(int argc, char **argv) {
         if (ok) ok = awg_pfroute_net4_if(1, argv[3], argv[4], ifname) == 0;
         if (ok) ok = awg_pfroute_net4_if(0, argv[3], argv[4], ifname) == 0;
         if (fd >= 0) close(fd);
-        fprintf(stderr, "senkoawgd: network route probe %s\n", ok ? "ok" : "failed");
+        fprintf(stderr, "legacyrayawgd: network route probe %s\n", ok ? "ok" : "failed");
         return ok ? 0 : 1;
     }
     if (strcmp(argv[1], "--route-plan-probe") == 0) {
@@ -308,7 +308,7 @@ int main(int argc, char **argv) {
                  awg_route_plan_up(&plan) == 0;
         if (ok) awg_route_plan_down(&plan);
         if (fd >= 0) close(fd);
-        fprintf(stderr, "senkoawgd: route plan probe %s\n", ok ? "ok" : "failed");
+        fprintf(stderr, "legacyrayawgd: route plan probe %s\n", ok ? "ok" : "failed");
         return ok ? 0 : 1;
     }
     if (strcmp(argv[1], "--run") == 0) {
@@ -318,9 +318,9 @@ int main(int argc, char **argv) {
     }
     awg_hs_status_t hr = awg_handshake_probe(&cfg, timeout_ms, reason, sizeof reason);
     if (hr != AWG_HS_OK) {
-        fprintf(stderr, "senkoawgd: %s\n", reason);
+        fprintf(stderr, "legacyrayawgd: %s\n", reason);
         return 1;
     }
-    printf("senkoawgd: handshake accepted by %s:%u\n", cfg.endpoint_host, cfg.endpoint_port);
+    printf("legacyrayawgd: handshake accepted by %s:%u\n", cfg.endpoint_host, cfg.endpoint_port);
     return 0;
 }

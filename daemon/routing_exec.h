@@ -58,6 +58,9 @@ typedef enum {
     REXEC_ERR_SPAWN     = -5
 } rexec_status_t;
 
+/* legacyray: the verdict for a name no rule matched (proxy or direct) */
+void routing_exec_set_default_action(rule_action_t action);
+
 /* locate the firewall tools once so every ipfw user searches the same paths */
 const char *routing_find_ipfw(void);
 const char *routing_find_pfctl(void);
@@ -95,7 +98,7 @@ int routing_exec_render(const routing_exec_t *st, char *buf, size_t cap,
 void routing_exec_dns_stats(uint64_t *hits, uint64_t *misses,
                             uint64_t *stale_hits, size_t *entries);
 
-/* the <senko_bypass> shadow: what it holds and what it has lost to its own
+/* the <legacyray_bypass> shadow: what it holds and what it has lost to its own
    capacity */
 void routing_exec_bypass_stats(pf_table_counts_t *counts,
                                uint64_t *evicted_addresses,

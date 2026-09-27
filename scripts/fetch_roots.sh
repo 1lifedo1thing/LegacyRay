@@ -4,7 +4,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="${ROOT}/senkotlsfix/roots"
+OUT="${ROOT}/legacyraytlsfix/roots"
 mkdir -p "${OUT}"
 
 fetch_one() {

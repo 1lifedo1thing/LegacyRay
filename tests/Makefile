@@ -52,10 +52,12 @@ HOST_TESTS += test_pf_table
 HOST_TESTS += test_trojan
 HOST_TESTS += test_shadowsocks
 HOST_TESTS += test_qr_zbar
+HOST_TESTS += test_legacyray
 
 all: test
 
 test: $(HOST_TESTS)
+	./test_legacyray
 	./test_trojan
 	./test_shadowsocks
 	./test_qr_zbar
@@ -264,6 +266,11 @@ test_transport_pick: test_transport_pick.c $(CORE)/transport_pick.c $(CFG_SRC) \
 	      $(CORE)/tls13_record.c $(CORE)/tls13_transcript.c $(CORE)/tls13_handshake.c \
       $(TRACE) $(REPLAY) $(UPLOAD) $(CORE)/grpc_core.c -o $@ $(TLS_LDFLAGS)
 
+test_legacyray: test_legacyray.c $(CORE)/rules.c $(CORE)/store.c $(DAEMON)/routing.c \
+                $(DAEMON)/settings.c $(CFG_SRC)
+	$(CC) $(CFLAGS) $(TLS_CFLAGS) -I$(DAEMON) test_legacyray.c $(CORE)/store.c \
+	      $(DAEMON)/routing.c $(DAEMON)/settings.c $(CFG_SRC) -o $@ $(TLS_LDFLAGS)
+
 test_routing_exec: test_routing_exec.c $(DAEMON)/routing_exec.c $(DAEMON)/routing.c \
                    $(DAEMON)/legacy_ios.c $(DAEMON)/routing_exec.h $(DAEMON)/routing.h \
                    $(CORE)/rules.c $(CORE)/rules.h $(CORE)/dns_msg.c \
@@ -276,10 +283,10 @@ test_pf_natlook: test_pf_natlook.c $(DAEMON)/pf_natlook.c $(DAEMON)/pf_natlook.h
 	$(CC) $(CFLAGS) -D_POSIX_C_SOURCE=200809L -DSENKO_HOST_TEST -I$(DAEMON) test_pf_natlook.c \
 	      $(DAEMON)/pf_natlook.c -o $@
 
-test_app_proxy: test_app_proxy.c ../senkotlsfix/stl_proxy.c ../senkotlsfix/stl_proxy.h
+test_app_proxy: test_app_proxy.c ../tweaks/tlsfix/stl_proxy.c ../tweaks/tlsfix/stl_proxy.h
 	$(CC) $(CFLAGS) $(THREAD_CFLAGS) -DSENKO_HOST_TEST \
-	      -DC_PROXY_STATE='"/tmp/senko-c-proxy-test"' \
-	      -I../senkotlsfix test_app_proxy.c ../senkotlsfix/stl_proxy.c \
+	      -DC_PROXY_STATE='"/tmp/legacyray-c-proxy-test"' \
+	      -I../tweaks/tlsfix test_app_proxy.c ../tweaks/tlsfix/stl_proxy.c \
 	      -o $@ $(THREAD_LDFLAGS)
 
 test_ctl_server: test_ctl_server.c $(DAEMON)/ctl_server.c $(CORE)/ctl_engine.c \
