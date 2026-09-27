@@ -124,11 +124,12 @@ for n in listdir(res_rel, ('.png', '.wav', '.txt', '.plist')):
     res_refs.append(ident)
     if n.endswith(('.png', '.wav', '.txt')):
         res_build.append(ident)
-flags_ref = oid('file', res_rel, 'flags')
-objects[flags_ref] = ('PBXFileReference', '{isa = PBXFileReference; lastKnownFileType = folder; path = flags; sourceTree = "<group>"; }', 'flags')
-sections['PBXFileReference'].append(flags_ref)
-res_refs.append(flags_ref)
-res_build.append(flags_ref)
+for folder in ('flags', 'server'):
+    folder_ref = oid('file', res_rel, folder)
+    objects[folder_ref] = ('PBXFileReference', '{isa = PBXFileReference; lastKnownFileType = folder; path = %s; sourceTree = "<group>"; }' % folder, folder)
+    sections['PBXFileReference'].append(folder_ref)
+    res_refs.append(folder_ref)
+    res_build.append(folder_ref)
 resources_group = group('Resources', 'app/Resources', res_refs, 'app-resources')
 
 # shared c from the daemon, compiled into the app
@@ -164,12 +165,12 @@ core = ['vless.c', 'b64.c', 'config.c', 'rules.c', 'dns_msg.c', 'dns_cache.c', '
         'tls_clienthello.c', 'tls13_kdf.c', 'tls13_keysched.c', 'tls13_record.c', 'tls13_transcript.c',
         'tls13_handshake.c', 'reality_handshake.c', 'socks5_client.c', 'http_client.c', 'vision.c',
         'awg_config.c', 'awg_handshake.c', 'awg_tunnel.c', 'trojan_client.c', 'shadowsocks_client.c',
-        'blake2b256.c']
-daemon_files = ['dialer.c', 'loop.c', 'pf_natlook.c', 'ctl_server.c', 'daemon_ctl.c', 'storefile.c',
-                'settings.c', 'status.c', 'routing.c', 'routing_exec.c', 'routing_fwd.c', 'pf_table.c',
-                'c_backend.c', 'go_config.c', 'go_backend.c', 'awg_utun.c', 'awg_route.c', 'awg_pfroute.c',
-                'legacy_ios.c', 'proc_detach.c', 'main.c', 'senkoctl.c', 'senko_kick.c', 'senkoawgd.c',
-                'legacy_compat.h']
+        'blake2b256.c', 'geo.c', 'frag.c']
+daemon_main = ['dialer.c', 'loop.c', 'pf_natlook.c', 'ctl_server.c', 'daemon_ctl.c', 'storefile.c',
+               'netwatch.c', 'geo_ctl.c', 'settings.c', 'status.c', 'routing.c', 'routing_exec.c',
+               'routing_fwd.c', 'pf_table.c', 'c_backend.c', 'go_config.c', 'go_backend.c', 'awg_utun.c',
+               'awg_route.c', 'awg_pfroute.c', 'legacy_ios.c', 'proc_detach.c', 'main.c']
+daemon_files = daemon_main + ['senkoctl.c', 'senko_kick.c', 'senkoawgd.c', 'lr_ssh.c', 'legacy_compat.h']
 d_refs = {}
 for n in core:
     ident = oid('file', 'daemon-core', n)
@@ -212,7 +213,7 @@ frameworks_group = group('Frameworks', None, [r for r, _ in fw_refs] + lib_refs,
 products = {}
 for name, kind in (('LegacyRay.app', 'wrapper.application'), ('legacyrayd', 'compiled.mach-o.executable'),
                    ('legacyrayctl', 'compiled.mach-o.executable'), ('legacyray-kick', 'compiled.mach-o.executable'),
-                   ('legacyrayawgd', 'compiled.mach-o.executable')):
+                   ('legacyrayawgd', 'compiled.mach-o.executable'), ('legacyray-ssh', 'compiled.mach-o.executable')):
     ident = oid('product', name)
     objects[ident] = ('PBXFileReference', '{isa = PBXFileReference; explicitFileType = %s; includeInIndex = 0; path = %s; sourceTree = BUILT_PRODUCTS_DIR; }'
                       % (q(kind), q(name)), name)
@@ -307,7 +308,7 @@ daemon_headers = [S + '/daemon/core"', S + '/daemon/core/third_party"', S + '/da
 OSSL_LIBS = [S + '/deps/openssl-armv7/lib/libssl.a"', S + '/deps/openssl-armv7/lib/libcrypto.a"', '-lz']
 
 
-def tool(name, files, libs):
+def tool(name, files, libs, extra_headers=()):
     src = [build_file(name, d_refs[f]) for f in files]
     phases = [phase('PBXSourcesBuildPhase', name + '-src', src),
               phase('PBXFrameworksBuildPhase', name + '-fw', []),
@@ -315,7 +316,7 @@ def tool(name, files, libs):
     return target(name, name, 'com.apple.product-type.tool', phases, {
         'PRODUCT_NAME': name,
         'GCC_C_LANGUAGE_STANDARD': 'c99',
-        'HEADER_SEARCH_PATHS': daemon_headers,
+        'HEADER_SEARCH_PATHS': daemon_headers + list(extra_headers),
         'OTHER_CFLAGS': DAEMON_FLAGS,
         'OTHER_LDFLAGS': libs,
         'USE_HEADERMAP': 'NO',
@@ -325,12 +326,15 @@ def tool(name, files, libs):
 
 core_all = ['core/' + c for c in core if c != 'awg_tunnel.c']
 daemon_targets = [
-    tool('legacyrayd', core_all + [f for f in daemon_files[:21]], OSSL_LIBS),
+    tool('legacyrayd', core_all + daemon_main, OSSL_LIBS),
     tool('legacyrayctl', ['senkoctl.c', 'core/b64.c'], []),
     tool('legacyray-kick', ['senko_kick.c'], []),
     tool('legacyrayawgd', ['senkoawgd.c', 'awg_utun.c', 'awg_route.c', 'awg_pfroute.c', 'core/awg_config.c',
                            'core/awg_handshake.c', 'core/awg_tunnel.c', 'core/b64.c', 'core/reality_crypto.c',
                            'status.c', 'legacy_ios.c', 'proc_detach.c'], OSSL_LIBS),
+    tool('legacyray-ssh', ['lr_ssh.c', 'core/b64.c'],
+         [S + '/deps/libssh2-armv7/lib/libssh2.a"', S + '/deps/openssl-armv7/lib/libcrypto.a"'],
+         [S + '/deps/libssh2-armv7/include"']),
 ]
 
 project_settings = {

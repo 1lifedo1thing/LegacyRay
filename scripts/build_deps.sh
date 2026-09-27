@@ -190,6 +190,11 @@ copy_for_xcode() {
   rm -rf "${dst}"
   mkdir -p "${dst}"
   cp -R "${DEPS}/openssl-armv7/lib" "${DEPS}/openssl-armv7/include" "${dst}/"
+  local ssh="${ROOT}/deps/libssh2-armv7"
+  rm -rf "${ssh}"
+  mkdir -p "${ssh}/lib"
+  cp "${DEPS}/libssh2-armv7/lib/libssh2.a" "${ssh}/lib/"
+  cp -R "${DEPS}/libssh2-armv7/include" "${ssh}/"
 }
 
 build_openssl_armv7
@@ -197,4 +202,4 @@ build_mbedtls_armv7
 build_libssh2_armv7
 if [[ "${1:-}" == "host" ]]; then build_openssl_host; fi
 copy_for_xcode
-echo "deps ready in ${DEPS} (openssl copied to deps/ for xcode)"
+echo "deps ready in ${DEPS} (openssl and libssh2 copied to deps/ for xcode)"
