@@ -48,6 +48,10 @@ typedef struct {
    picks up on its next pass instead of a second writer */
     int            flush_dns_requested;
     int            flush_bypass_requested;
+/* the forwarder sleeps in poll until a query or this pipe wakes it; a stop or
+   a flush request writes one byte. it used to wake every second to look */
+    int            dns_wake[2];
+    int            dns_wake_ok; /* dns_wake holds a live pipe; a zeroed struct does not */
 } routing_exec_t;
 
 typedef enum {

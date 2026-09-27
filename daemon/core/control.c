@@ -246,6 +246,13 @@ ctl_status_t ctl_parse_cmd(const char *line, size_t len, ctl_cmd_t *out) {
         out->kind = CTL_CMD_STATUS;
         return CTL_OK;
     }
+    if (verb_is(line, len, "WATCH", &rest, &rl)) {
+        out->kind = CTL_CMD_WATCH;
+        out->server_index = 1;
+        if (rl == 3 && memcmp(rest, "OFF", 3) == 0) out->server_index = 0;
+        else if (rl != 0) return CTL_ERR_PARSE;
+        return CTL_OK;
+    }
     if (verb_is(line, len, "LIST", &rest, &rl) && rl == 0) {
         out->kind = CTL_CMD_LIST;
         return CTL_OK;

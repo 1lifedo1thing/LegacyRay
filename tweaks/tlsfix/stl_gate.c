@@ -85,7 +85,7 @@ static void stl_gate_init(void) {
     if (ios_major >= 12) {
         /* injecting the legacy shim on ios 12 adds crash surface without fixing TLS */
         g_gate_state = -1;
-        stl_log("gate: ios %d uses system tls", ios_major);
+        stl_debug("gate: ios %d uses system tls", ios_major);
         return;
     }
     if (stl_external_tlsfix()) {
@@ -106,7 +106,7 @@ static void stl_gate_init(void) {
         if (prefs && stl_cfbool(prefs, "enableAll", 0)) {
             CFRelease(prefs);
             g_gate_state = 1;
-            stl_log("gate: active for %s enableall", pn ? pn : "unknown");
+            stl_debug("gate: active for %s enableall", pn ? pn : "unknown");
             return;
         }
         if (prefs) CFRelease(prefs);
@@ -145,7 +145,7 @@ static void stl_gate_init(void) {
     if (prefs) CFRelease(prefs);
     g_gate_state = on ? 1 : -1;
     if (on)
-        stl_log("gate: active for %s", bid);
+        stl_debug("gate: active for %s", bid);
 }
 
 int stl_gate_skip_process(void) {

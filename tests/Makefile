@@ -181,9 +181,9 @@ test_b64: test_b64.c $(CORE)/b64.c $(CORE)/b64.h
 sub_audit: sub_audit.c $(CFG_SRC) $(CORE)/config.h $(CORE)/b64.h
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) sub_audit.c $(CFG_SRC) -o $@ $(TLS_LDFLAGS)
 
-test_transport_ws: test_transport_ws.c $(CORE)/transport_ws.c $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/transport.h
+test_transport_ws: test_transport_ws.c $(CORE)/transport_ws.c $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/tls_clienthello.c $(CORE)/transport.h
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) test_transport_ws.c $(CORE)/transport_ws.c \
-	      $(CORE)/transport_tcp.c $(CORE)/transport_tls.c -o $@ $(TLS_LDFLAGS)
+	      $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/tls_clienthello.c -o $@ $(TLS_LDFLAGS)
 
 test_store_contract: test_store_contract.c $(CORE)/store.c $(CFG_SRC) $(CORE)/store.h
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) test_store_contract.c $(CORE)/store.c $(CFG_SRC) -o $@ $(TLS_LDFLAGS)
@@ -267,9 +267,10 @@ test_transport_pick: test_transport_pick.c $(CORE)/transport_pick.c $(CFG_SRC) \
       $(TRACE) $(REPLAY) $(UPLOAD) $(CORE)/grpc_core.c -o $@ $(TLS_LDFLAGS)
 
 test_legacyray: test_legacyray.c $(CORE)/rules.c $(CORE)/store.c $(DAEMON)/routing.c \
-                $(DAEMON)/settings.c $(CFG_SRC)
+                $(DAEMON)/settings.c $(CORE)/tls_clienthello.c $(CFG_SRC)
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) -I$(DAEMON) test_legacyray.c $(CORE)/store.c \
-	      $(DAEMON)/routing.c $(DAEMON)/settings.c $(CFG_SRC) -o $@ $(TLS_LDFLAGS)
+	      $(DAEMON)/routing.c $(DAEMON)/settings.c $(CORE)/tls_clienthello.c \
+	      $(CFG_SRC) -o $@ $(TLS_LDFLAGS)
 
 test_routing_exec: test_routing_exec.c $(DAEMON)/routing_exec.c $(DAEMON)/routing.c \
                    $(DAEMON)/legacy_ios.c $(DAEMON)/routing_exec.h $(DAEMON)/routing.h \
@@ -349,9 +350,9 @@ fuzz_wire: fuzz_wire.c $(CORE)/socks5.c $(CORE)/vless.c $(CORE)/url.c $(NET_SAFE
 	/usr/bin/clang $(FUZZ_FLAGS) fuzz_wire.c $(CORE)/socks5.c $(CORE)/vless.c \
 	      $(CORE)/url.c $(NET_SAFE) -o $@
 
-fuzz_ws: fuzz_ws.c $(CORE)/transport_ws.c $(CORE)/transport_tcp.c $(CORE)/transport_tls.c
+fuzz_ws: fuzz_ws.c $(CORE)/transport_ws.c $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/tls_clienthello.c
 	/usr/bin/clang $(FUZZ_FLAGS) fuzz_ws.c $(CORE)/transport_ws.c \
-	      $(CORE)/transport_tcp.c $(CORE)/transport_tls.c -o $@ -lssl -lcrypto
+	      $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/tls_clienthello.c -o $@ -lssl -lcrypto
 
 fuzz_vision: fuzz_vision.c $(CORE)/vision.c
 	/usr/bin/clang $(FUZZ_FLAGS) fuzz_vision.c $(CORE)/vision.c -o $@

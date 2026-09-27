@@ -67,6 +67,7 @@ typedef struct {
     int      rules_default;  /* verdict for unmatched names: 0 proxy, 1 direct */
     int      bypass_lan;     /* lan, link-local and cgnat skip the tunnel */
     int      sub_panel_title; /* a refresh always takes the panel's name */
+    int      prefer_chacha;   /* ask servers for chacha20, cheap on armv7 */
     char     xray_version[16];   /* claimed in the reality session id */
     char     sub_user_agent[SETTINGS_VALUE_MAX]; /* default subscription UA */
 } daemon_settings_t;

@@ -207,7 +207,7 @@ static int stl_connect(int fd, const struct sockaddr *addr, socklen_t addr_len) 
         inet_ntop(AF_INET6, &v6->sin6_addr, dest_text, sizeof dest_text);
         dest_port = ntohs(v6->sin6_port);
     }
-    stl_log("redirect %s: fd %d to %s:%u via 127.0.0.1:%d",
+    stl_debug("redirect %s: fd %d to %s:%u via 127.0.0.1:%d",
             getprogname() ? getprogname() : "?", fd, dest_text, dest_port, port);
 
     int flags = fcntl(fd, F_GETFL, 0);
@@ -261,7 +261,7 @@ void stl_proxy_install_hooks(void) {
         { "connect", (void *)stl_connect, (void **)&orig_connect }
     };
     if (rebind_symbols(hooks, sizeof hooks / sizeof hooks[0]) == 0)
-        stl_log("c backend application proxy hook installed");
+        stl_debug("c backend application proxy hook installed");
 }
 
 #ifdef SENKO_HOST_TEST

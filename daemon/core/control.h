@@ -43,7 +43,12 @@ typedef enum {
     CTL_CMD_FWCONF, /* dump the firewall ruleset the kernel is running */
     CTL_CMD_FLUSH,  /* drop one piece of accumulated state by name */
     CTL_CMD_HWID_RESET, /* issue a new device id for the subscription panels */
-    CTL_CMD_NATIVE_CONFIG /* render a provider configuration for iOS 12+ */
+    CTL_CMD_NATIVE_CONFIG, /* render a provider configuration for iOS 12+ */
+/* legacyray: keep this connection open and push STATE and STAT lines to it.
+   the subscription is a lease the client renews, so an app that is suspended
+   with the socket still open stops costing the daemon wakeups on its own.
+   WATCH OFF ends it early */
+    CTL_CMD_WATCH
 } ctl_cmd_kind_t;
 
 typedef struct {

@@ -310,13 +310,37 @@ static size_t build_stats(ctl_server_t *s, char *line, size_t cap) {
     return n;
 }
 
+/* a watcher renews well inside this; one that stops renewing (an app
+   suspended with its socket open) drops out on its own */
+#define CTL_WATCH_LEASE_MS 45000
+
+static int client_watching(const ctl_client_t *c, long now) {
+    return c->fd >= 0 && c->authed && c->watch_until_ms && now < c->watch_until_ms;
+}
+
+/* counters only move while a tunnel carries traffic, and only a client that
+   asked for them is looking; anything else would wake the daemon every
+   second for nobody */
+static int stats_wanted(const ctl_server_t *s, long now) {
+    if (!s->stats || s->engine.state != CTL_STATE_CONNECTED) return 0;
+    for (size_t i = 0; i < CTL_SERVER_MAX_CLIENTS; ++i)
+        if (client_watching(&s->clients[i], now)) return 1;
+    return 0;
+}
+
+static void client_write(ctl_client_t *c, const char *buf, size_t len);
+
 static void broadcast_stats(ctl_server_t *s) {
-    uint64_t now = stat_now_ms();
-    if (!s->stats || (s->stat_at_ms && now - s->stat_at_ms < 1000)) return;
-    s->stat_at_ms = now;
+    long now = (long)stat_now_ms();
+    if (!stats_wanted(s, now)) return;
+    if (s->stat_at_ms && now - (long)s->stat_at_ms < 1000) return;
+    s->stat_at_ms = (uint64_t)now;
     char line[64];
     size_t n = build_stats(s, line, sizeof line);
-    if (n) ctl_server_broadcast(s, line, n);
+    if (!n) return;
+    for (size_t i = 0; i < CTL_SERVER_MAX_CLIENTS; ++i)
+        if (client_watching(&s->clients[i], now))
+            client_write(&s->clients[i], line, n);
 }
 
 void ctl_server_set_settings(ctl_server_t *s, const daemon_settings_t *settings) {
@@ -407,6 +431,7 @@ static void drop_client(ctl_client_t *c) {
     free(c->outbuf);
     c->fd = -1;
     c->authed = 0;
+    c->watch_until_ms = 0;
     c->in_len = 0;
     c->outbuf = NULL;
     c->out_len = 0;
@@ -438,6 +463,7 @@ static void accept_one(ctl_server_t *s) {
     set_nonblock(cfd);
     c->fd = cfd;
     c->authed = 0;
+    c->watch_until_ms = 0;
     c->in_len = 0;
     c->generation = ++s->client_generation;
 }
@@ -1179,9 +1205,28 @@ void ctl_server_tunnel_lost(ctl_server_t *s) {
    nothing. SystemConfiguration is not linked into the armv7 slice, and its
    reachability callbacks need a run loop the daemon does not have, so the
    interface list is polled instead */
+static int egress_matters(const ctl_server_t *s) {
+    return s->engine.state == CTL_STATE_CONNECTED || s->retry_at_ms != 0;
+}
+
 static void check_egress_change(ctl_server_t *s, long now) {
     if (!s->settings || !s->settings->auto_reconnect) return;
-    if (s->egress_check_ms && now - s->egress_check_ms < 2000) return;
+/* with no tunnel up a move changes nothing; the egress a tunnel starts on is
+   the one it is compared against, so the reference is taken when it matters */
+    if (!egress_matters(s)) {
+        s->egress_iface[0] = '\0';
+        s->egress_ip[0] = '\0';
+        s->egress_due_ms = 0;
+        return;
+    }
+    int baseline = s->egress_iface[0] == '\0';
+    if (baseline || !s->netwatch_live) {
+        if (s->egress_check_ms && now - s->egress_check_ms < 2000) return;
+    } else {
+/* the kernel said something moved and the settle time is over */
+        if (!(s->egress_due_ms && now >= s->egress_due_ms)) return;
+    }
+    s->egress_due_ms = 0;
     s->egress_check_ms = now;
 
     char name[sizeof s->egress_iface];
@@ -1261,6 +1306,65 @@ void ctl_server_tick(ctl_server_t *s) {
     }
 
     check_scheduled_refresh(s, now);
+}
+
+void ctl_server_set_netwatch(ctl_server_t *s, int live) {
+    if (s) s->netwatch_live = live ? 1 : 0;
+}
+
+/* a move comes as a burst of address, interface and route messages over a
+   second or so; look once when it has settled */
+#define CTL_EGRESS_SETTLE_MS 1500
+
+void ctl_server_network_changed(ctl_server_t *s) {
+    if (!s) return;
+    long due = ctl_now_ms() + CTL_EGRESS_SETTLE_MS;
+    if (!s->egress_due_ms || due < s->egress_due_ms) s->egress_due_ms = due;
+}
+
+/* when check_scheduled_refresh will next find a subscription to pull */
+static long refresh_due_in_ms(const ctl_server_t *s, long now) {
+    if (!s->settings || s->settings->sub_refresh_hours <= 0 || !s->fetch) return -1;
+    uint64_t nowsec = (uint64_t)ctl_engine_now();
+    uint64_t period = (uint64_t)s->settings->sub_refresh_hours * 3600u;
+    long best = -1;
+    for (int i = 0; i < STORE_MAX_SUBS; ++i) {
+        if (!s->engine.store.subs[i].used) continue;
+        uint64_t last = s->engine.store.subs[i].last_refresh;
+        uint64_t left_s = (last && nowsec < last + period) ? last + period - nowsec : 0;
+        if (left_s > 86400u) left_s = 86400u; /* look again tomorrow at the latest */
+        long due = (long)(left_s * 1000u);
+        if (s->sub_retry_at_ms[i] && s->sub_retry_at_ms[i] - now > due)
+            due = s->sub_retry_at_ms[i] - now;
+        if (best < 0 || due < best) best = due;
+    }
+    if (best >= 0 && s->sub_check_ms) {
+        long gate = s->sub_check_ms + 60000 - now;
+        if (gate > best) best = gate;
+    }
+    return best;
+}
+
+int ctl_server_timeout_ms(ctl_server_t *s) {
+    if (!s) return -1;
+    long now = ctl_now_ms();
+    long best = -1;
+#define CTL_TAKE(v) do { long _v = (v); if (_v < 0) _v = 0; \
+                         if (best < 0 || _v < best) best = _v; } while (0)
+    if (s->retry_at_ms) CTL_TAKE(s->retry_at_ms - now);
+    if (stats_wanted(s, now))
+        CTL_TAKE(s->stat_at_ms ? (long)s->stat_at_ms + 1000 - now : 0);
+    if (s->settings && s->settings->auto_reconnect && egress_matters(s)) {
+        if (s->egress_iface[0] == '\0' || !s->netwatch_live)
+            CTL_TAKE(s->egress_check_ms ? s->egress_check_ms + 2000 - now : 0);
+        else if (s->egress_due_ms)
+            CTL_TAKE(s->egress_due_ms - now);
+    }
+    long r = refresh_due_in_ms(s, now);
+    if (r >= 0) CTL_TAKE(r);
+#undef CTL_TAKE
+    if (best < 0) return -1;
+    return best > 0x7fffffffL - 1 ? 0x7fffffff - 1 : (int)best + 1;
 }
 
 static int server_supported(const vl_server_t *sv) {
@@ -1382,6 +1486,29 @@ static void dispatch_line(ctl_server_t *s, ctl_client_t *c,
         char err[64]; size_t en = 0;
         if (ctl_build_err("auth required", err, sizeof err, &en) == CTL_OK)
             client_write(c, err, en);
+        return;
+    }
+
+    if (cmd.kind == CTL_CMD_WATCH) {
+        char reply[64]; size_t rn = 0;
+        int on = cmd.server_index != 0;
+        c->watch_until_ms = on ? ctl_now_ms() + CTL_WATCH_LEASE_MS : 0;
+        if (ctl_build_ok(on ? "watching" : "unwatched", reply, sizeof reply, &rn) == CTL_OK)
+            client_write(c, reply, rn);
+        if (on) {
+/* the picture as it is now, then only changes */
+            char ev[64]; size_t en = 0;
+            if (ctl_build_state(s->engine.state, ctl_engine_uptime(&s->engine),
+                                ev, sizeof ev, &en) == CTL_OK)
+                client_write(c, ev, en);
+            char line[64];
+            size_t n = s->engine.state == CTL_STATE_CONNECTED
+                ? build_stats(s, line, sizeof line) : 0;
+            if (n) {
+                client_write(c, line, n);
+                s->stat_at_ms = stat_now_ms();
+            }
+        }
         return;
     }
 
@@ -2086,55 +2213,68 @@ static void service_client(ctl_server_t *s, ctl_client_t *c) {
     }
 }
 
-ctls_status_t ctl_server_step(ctl_server_t *s, int timeout_ms) {
-    if (!s) return CTLS_ERR_ARG;
+size_t ctl_server_prepare(ctl_server_t *s, struct pollfd *pfd, size_t cap) {
+    if (!s || !pfd || cap < 2) return 0;
     broadcast_stats(s);
-    if (s->stats && (timeout_ms < 0 || timeout_ms > 1000)) timeout_ms = 1000;
 
-    struct pollfd pfd[2 + CTL_SERVER_MAX_CLIENTS];
-    int map[2 + CTL_SERVER_MAX_CLIENTS];
-    nfds_t nf = 0;
-
+    size_t nf = 0;
     pfd[nf].fd = s->listen_fd;
     pfd[nf].events = POLLIN;
-    map[nf] = -2;
+    pfd[nf].revents = 0;
     nf++;
 
     pfd[nf].fd = s->ping_pipe[0];
     pfd[nf].events = POLLIN;
-    map[nf] = -1;
+    pfd[nf].revents = 0;
     nf++;
 
-    for (size_t i = 0; i < CTL_SERVER_MAX_CLIENTS; ++i) {
+    for (size_t i = 0; i < CTL_SERVER_MAX_CLIENTS; ++i) s->poll_slot[i] = -1;
+    for (size_t i = 0; i < CTL_SERVER_MAX_CLIENTS && nf < cap; ++i) {
         if (s->clients[i].fd < 0) continue;
         pfd[nf].fd = s->clients[i].fd;
         pfd[nf].events = POLLIN;
+        pfd[nf].revents = 0;
         if (s->clients[i].out_len > s->clients[i].out_off)
             pfd[nf].events |= POLLOUT;
-        map[nf] = (int)i;
+        s->poll_slot[nf - 2] = (int)i;
         nf++;
     }
+    s->poll_n = nf;
+    return nf;
+}
 
-    int r = poll(pfd, nf, timeout_ms);
-    if (r < 0) return (errno == EINTR) ? CTLS_OK : CTLS_ERR;
-    if (r == 0) return CTLS_OK;
+void ctl_server_dispatch(ctl_server_t *s, const struct pollfd *pfd, size_t nf) {
+    if (!s || !pfd || nf < 2 || nf != s->poll_n) return;
 
     if (pfd[0].revents & POLLIN) accept_one(s);
 
     if (pfd[1].revents & (POLLIN | POLLHUP | POLLERR))
         drain_ping_results(s);
 
-    for (nfds_t i = 2; i < nf; ++i) {
-        int slot = map[i];
+    for (size_t i = 2; i < nf; ++i) {
+        int slot = s->poll_slot[i - 2];
         if (slot < 0 || slot >= CTL_SERVER_MAX_CLIENTS) continue;
         ctl_client_t *c = &s->clients[slot];
-        if (c->fd < 0) continue;
+        if (c->fd < 0 || c->fd != pfd[i].fd) continue;
         if (pfd[i].revents & POLLOUT)
             (void)client_flush(c);
         if (c->fd < 0) continue;
         if (pfd[i].revents & (POLLIN | POLLHUP | POLLERR))
             service_client(s, c);
     }
+}
+
+ctls_status_t ctl_server_step(ctl_server_t *s, int timeout_ms) {
+    if (!s) return CTLS_ERR_ARG;
+    struct pollfd pfd[CTL_SERVER_POLLFD_MAX];
+    size_t nf = ctl_server_prepare(s, pfd, CTL_SERVER_POLLFD_MAX);
+    int due = ctl_server_timeout_ms(s);
+    if (due >= 0 && (timeout_ms < 0 || due < timeout_ms)) timeout_ms = due;
+
+    int r = poll(pfd, (nfds_t)nf, timeout_ms);
+    if (r < 0) return (errno == EINTR) ? CTLS_OK : CTLS_ERR;
+    if (r == 0) return CTLS_OK;
+    ctl_server_dispatch(s, pfd, nf);
     return CTLS_OK;
 }
 

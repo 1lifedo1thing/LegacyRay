@@ -62,6 +62,9 @@ void daemon_ctl_shutdown(daemon_ctl_t *d);
 
 /* tear down routes if the separate go core exits unexpectedly */
 int daemon_ctl_maintain(daemon_ctl_t *d);
+
+/* how soon daemon_ctl_maintain needs to run again, -1 when never on its own */
+int daemon_ctl_timeout_ms(const daemon_ctl_t *d);
 int daemon_ctl_stats(void *ctx, uint64_t *up, uint64_t *down);
 
 int daemon_ctl_apply(void *ctx, const ctl_action_t *action);

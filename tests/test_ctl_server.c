@@ -705,17 +705,45 @@ int main(void) {
     ctl_server_step(&s, 0);
     ctl_server_set_stats(&s, sample_stats);
     ctl_server_step(&s, 0);
-    ssize_t stat_n = read(cli, buf, sizeof buf - 1);
-    if (stat_n >= 0) buf[stat_n] = '\0';
-    ok("stats broadcast", stat_n > 0 && strcmp(buf, "STAT 4294967300 8589934600\n") == 0);
+/* legacyray: counters go only to a client that asked with WATCH, and only
+   while a tunnel is up, so nobody watching means no timer at all */
+    ok("stats silent without a watcher", read(cli, buf, sizeof buf) < 0 && errno == EAGAIN);
+    ok("stats no wakeup without a watcher", ctl_server_timeout_ms(&s) < 0);
+    write(cli, "WATCH\n", 6);
+    exchange(&s, cli, buf, sizeof buf);
+    ok("watch while idle", strstr(buf, "OK watching\n") != NULL &&
+                           strstr(buf, "STATE idle") != NULL && strstr(buf, "STAT ") == NULL);
+    ok("watch idle no wakeup", ctl_server_timeout_ms(&s) < 0);
+    ctl_engine_notify(&s.engine, CTL_STATE_CONNECTED, ev, sizeof ev, &en);
+    write(cli, "WATCH\n", 6);
+    exchange(&s, cli, buf, sizeof buf);
+    ok("stats broadcast", strstr(buf, "OK watching\n") != NULL &&
+                          strstr(buf, "STATE connected") != NULL &&
+                          strstr(buf, "STAT 4294967300 8589934600\n") != NULL);
     ok("stats auth gate", read(unauth, buf, sizeof buf) < 0 && errno == EAGAIN);
     int samples = g_stats_calls;
     ctl_server_step(&s, 0);
     ok("stats once per second", g_stats_calls == samples);
+    int due = ctl_server_timeout_ms(&s);
+    ok("stats wake within a second", due > 0 && due <= 1001);
     s.stat_at_ms -= 1000;
     ctl_server_step(&s, 0);
     ok("stats idle poll", g_stats_calls == samples + 1);
     ok("stats idle delivery", read(cli, buf, sizeof buf) > 0);
+    write(cli, "WATCH OFF\n", 10);
+    exchange(&s, cli, buf, sizeof buf);
+    ok("watch off", strncmp(buf, "OK unwatched", 12) == 0);
+    samples = g_stats_calls;
+    s.stat_at_ms -= 1000;
+    ctl_server_step(&s, 0);
+    ok("stats stop after watch off", g_stats_calls == samples &&
+                                     ctl_server_timeout_ms(&s) < 0);
+    write(cli, "WATCH\n", 6);
+    exchange(&s, cli, buf, sizeof buf);
+    s.clients[0].watch_until_ms = 1; /* the lease ran out */
+    for (size_t i = 0; i < CTL_SERVER_MAX_CLIENTS; ++i)
+        if (s.clients[i].fd >= 0 && s.clients[i].watch_until_ms) s.clients[i].watch_until_ms = 1;
+    ok("stats stop when the lease ends", ctl_server_timeout_ms(&s) < 0);
     write(cli, "STATUS\n", 7);
     exchange(&s, cli, buf, sizeof buf);
     ok("stats before status", strncmp(buf, "STAT 4294967300 8589934600\nSTATE ", 31) == 0);
@@ -728,6 +756,7 @@ int main(void) {
     exchange(&s, cli, buf, sizeof buf);
     ok("stats recovery", strstr(buf, "STAT ") != NULL && !s.stat_failed);
     ctl_server_set_stats(&s, NULL);
+    ctl_engine_notify(&s.engine, CTL_STATE_IDLE, ev, sizeof ev, &en);
     close(unauth);
 
 /* the settings verbs: the daemon owns the values, so SET goes out as an action

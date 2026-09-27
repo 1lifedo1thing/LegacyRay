@@ -13,6 +13,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 
 #define LOOP_OPEN_STACK_SZ (512 * 1024)
 
@@ -813,38 +814,47 @@ static void service_conn(loop_t *lp, loop_conn_t *c,
     }
 }
 
-loop_status_t loop_step(loop_t *lp, int timeout_ms) {
-    if (!lp) return LOOP_ERR_ARG;
+static long loop_now_ms(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long)tv.tv_sec * 1000L + (long)(tv.tv_usec / 1000);
+}
+
+size_t loop_prepare(loop_t *lp, struct pollfd *pfd, size_t cap) {
+    if (!lp || !pfd || cap < 3) return 0;
     reap_opening_conns(lp);
 
-    struct pollfd pfd[3 + 2 * LOOP_MAX_CONNS];
-    loop_conn_t *map[3 + 2 * LOOP_MAX_CONNS]; /* fd to conn map */
-    int is_remote[3 + 2 * LOOP_MAX_CONNS];
+    loop_conn_t **map = lp->poll_map;
+    uint8_t *is_remote = lp->poll_remote;
+    if (cap > LOOP_POLLFD_MAX) cap = LOOP_POLLFD_MAX;
 
-    nfds_t nf = 0;
+    size_t nf = 0;
     pfd[nf].fd = lp->listen_fd;
     pfd[nf].events = POLLIN;
+    pfd[nf].revents = 0;
     map[nf] = NULL; is_remote[nf] = 0;
     nf++;
 
-    int tproxy_idx = -1;
+    lp->poll_tproxy_idx = -1;
     if (lp->tproxy_fd >= 0) {
-        tproxy_idx = (int)nf;
+        lp->poll_tproxy_idx = (int)nf;
         pfd[nf].fd = lp->tproxy_fd;
         pfd[nf].events = POLLIN;
+        pfd[nf].revents = 0;
         map[nf] = NULL; is_remote[nf] = 0;
         nf++;
     }
 
-    nfds_t wake_idx = nf;
+    lp->poll_wake_idx = nf;
     pfd[nf].fd = lp->wake_rd;
     pfd[nf].events = POLLIN;
+    pfd[nf].revents = 0;
     map[nf] = NULL; is_remote[nf] = 0;
     nf++;
 
-    nfds_t conn_base = nf;
+    lp->poll_conn_base = nf;
 
-    for (size_t i = 0; i < LOOP_MAX_CONNS; ++i) {
+    for (size_t i = 0; i < LOOP_MAX_CONNS && nf + 2 <= cap; ++i) {
         loop_conn_t *c = &lp->conns[i];
         if (!c->used) continue;
 
@@ -855,6 +865,7 @@ loop_status_t loop_step(loop_t *lp, int timeout_ms) {
             if (c->pend_off < c->pend_len) lev |= POLLOUT;
             pfd[nf].fd = c->local_fd;
             pfd[nf].events = lev;
+            pfd[nf].revents = 0;
             map[nf] = c; is_remote[nf] = 0;
             nf++;
             continue;
@@ -868,6 +879,7 @@ loop_status_t loop_step(loop_t *lp, int timeout_ms) {
         if (c->pend_off < c->pend_len) lev |= POLLOUT;
         pfd[nf].fd = c->local_fd;
         pfd[nf].events = lev;
+        pfd[nf].revents = 0;
         map[nf] = c; is_remote[nf] = 0;
         nf++;
 
@@ -879,27 +891,34 @@ loop_status_t loop_step(loop_t *lp, int timeout_ms) {
             ev |= POLLOUT;
         pfd[nf].fd = c->remote_fd;
         pfd[nf].events = ev;
+        pfd[nf].revents = 0;
         map[nf] = c; is_remote[nf] = 1;
         nf++;
     }
+    return nf;
+}
 
-    int r = poll(pfd, nf, timeout_ms);
-    if (r < 0) {
-        if (errno == EINTR) return LOOP_OK;
-        return LOOP_ERR;
-    }
-    if (r == 0) return LOOP_OK; /* timeout, nothing to do */
+void loop_dispatch(loop_t *lp, const struct pollfd *pfd, size_t nf) {
+    if (!lp || !pfd || nf < 1 || nf <= lp->poll_wake_idx) return;
+    loop_conn_t **map = lp->poll_map;
+    const uint8_t *is_remote = lp->poll_remote;
+
+    int any = 0;
+    for (size_t i = 0; i < nf; ++i)
+        if (pfd[i].revents) { any = 1; break; }
+    if (!any) return; /* a timeout: prepare already pumped what was due */
 
     if (pfd[0].revents & POLLIN) accept_one(lp);
-    if (tproxy_idx >= 0 && (pfd[tproxy_idx].revents & POLLIN))
+    if (lp->poll_tproxy_idx >= 0 && (pfd[lp->poll_tproxy_idx].revents & POLLIN))
         accept_tproxy_one(lp);
-    if (pfd[wake_idx].revents & POLLIN) {
+    if (pfd[lp->poll_wake_idx].revents & POLLIN) {
         drain_wake(lp);
         reap_opening_conns(lp);
     }
 
     /* process connections after accepting new clients */
-    for (nfds_t i = conn_base; i < nf; ++i) {
+    size_t conn_base = lp->poll_conn_base;
+    for (size_t i = conn_base; i < nf; ++i) {
         loop_conn_t *c = map[i];
         if (!c || !c->used) continue;
 
@@ -911,7 +930,7 @@ loop_status_t loop_step(loop_t *lp, int timeout_ms) {
         short local_re = 0, remote_re = 0;
         if (is_remote[i]) remote_re = pfd[i].revents;
         else              local_re  = pfd[i].revents;
-        for (nfds_t j = conn_base; j < nf; ++j) {
+        for (size_t j = conn_base; j < nf; ++j) {
             if (j == i || map[j] != c) continue;
             if (is_remote[j]) remote_re |= pfd[j].revents;
             else              local_re  |= pfd[j].revents;
@@ -919,11 +938,41 @@ loop_status_t loop_step(loop_t *lp, int timeout_ms) {
 
         service_conn(lp, c, local_re, remote_re);
 
-        for (nfds_t j = conn_base; j < nf; ++j) {
+        for (size_t j = conn_base; j < nf; ++j) {
             if (map[j] == c) map[j] = NULL;
         }
     }
     reap_opening_conns(lp);
+}
+
+int loop_timeout_ms(const loop_t *lp) {
+    if (!lp) return -1;
+    long best = -1, now = 0;
+    for (size_t i = 0; i < LOOP_MAX_CONNS; ++i) {
+        const loop_conn_t *c = &lp->conns[i];
+        if (!c->used || c->opening || c->sess.state != SESS_VISION_FIRST) continue;
+        if (!now) now = loop_now_ms();
+        long left = c->sess.vision_first_deadline_ms - now;
+        if (left < 0) left = 0;
+        if (best < 0 || left < best) best = left;
+    }
+    return best < 0 ? -1 : (int)(best + 1);
+}
+
+loop_status_t loop_step(loop_t *lp, int timeout_ms) {
+    if (!lp) return LOOP_ERR_ARG;
+    struct pollfd pfd[LOOP_POLLFD_MAX];
+    size_t nf = loop_prepare(lp, pfd, LOOP_POLLFD_MAX);
+    int due = loop_timeout_ms(lp);
+    if (due >= 0 && (timeout_ms < 0 || due < timeout_ms)) timeout_ms = due;
+
+    int r = poll(pfd, (nfds_t)nf, timeout_ms);
+    if (r < 0) {
+        if (errno == EINTR) return LOOP_OK;
+        return LOOP_ERR;
+    }
+    if (r == 0) return LOOP_OK; /* timeout, nothing to do */
+    loop_dispatch(lp, pfd, nf);
     return LOOP_OK;
 }
 

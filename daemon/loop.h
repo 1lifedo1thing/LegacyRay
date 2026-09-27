@@ -17,6 +17,8 @@ extern "C" {
 /* allow safari bursts so connection drops do not force page reloads */
 #define LOOP_MAX_OPENING 48
 #define LOOP_PREBUF_CAP (16 * 1024)
+/* listener, transparent listener, wake pipe, then two sockets per conn */
+#define LOOP_POLLFD_MAX (3 + 2 * LOOP_MAX_CONNS)
 
 typedef int (*loop_dialer_fn)(void *ctx);
 
@@ -112,6 +114,13 @@ typedef struct loop {
     int         wake_wr;
     pthread_mutex_t open_lock;
     int         open_lock_ready;
+
+/* what loop_prepare put where, for loop_dispatch to read the answers back */
+    loop_conn_t *poll_map[LOOP_POLLFD_MAX];
+    uint8_t      poll_remote[LOOP_POLLFD_MAX];
+    int          poll_tproxy_idx;
+    size_t       poll_wake_idx;
+    size_t       poll_conn_base;
 } loop_t;
 
 typedef enum {
@@ -159,6 +168,18 @@ loop_status_t loop_enable_tproxy_sockname(loop_t *lp, uint16_t port);
 void loop_disable_tproxy(loop_t *lp);
 
 loop_status_t loop_step(loop_t *lp, int timeout_ms);
+
+/* loop_step in two halves, so the daemon can sleep on the loop, the control
+   socket and the network watch in one poll instead of taking turns with short
+   timeouts. prepare fills at most cap entries and returns how many; dispatch
+   takes the same entries back after poll has filled revents */
+struct pollfd;
+size_t loop_prepare(loop_t *lp, struct pollfd *pfd, size_t cap);
+void loop_dispatch(loop_t *lp, const struct pollfd *pfd, size_t n);
+
+/* milliseconds until a connection needs the loop without any socket event,
+   -1 when nothing is waiting on the clock */
+int loop_timeout_ms(const loop_t *lp);
 
 size_t loop_conn_count(const loop_t *lp);
 

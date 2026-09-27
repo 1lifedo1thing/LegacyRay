@@ -73,6 +73,7 @@ static void daemon_settings_publish(const daemon_settings_t *s, const ruleset_t 
                                                      : RULE_ACTION_PROXY);
     (void)reality_set_client_version(s->xray_version);
     (void)url_set_default_user_agent(s->sub_user_agent);
+    tls_ch_set_prefer_chacha(s->prefer_chacha);
 }
 
 void daemon_ctl_set_settings(daemon_ctl_t *d, const daemon_settings_t *s) {
@@ -112,6 +113,11 @@ int daemon_ctl_maintain(daemon_ctl_t *d) {
     loop_stop(d->loop);
     status_set(0);
     return -1;
+}
+
+/* only an external core can die without the loop hearing about it */
+int daemon_ctl_timeout_ms(const daemon_ctl_t *d) {
+    return (d && d->go.active) ? 1000 : -1;
 }
 
 int daemon_ctl_stats(void *ctx, uint64_t *up, uint64_t *down) {

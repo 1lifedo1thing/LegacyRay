@@ -5,6 +5,7 @@
 #include "store.h"
 #include "routing.h"
 #include "settings.h"
+#include "tls_clienthello.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -173,7 +174,49 @@ static void test_store_extra(void) {
        strcmp(back.subs[sub].web_page_url, "https://panel.example/me?a=1 b") == 0);
 }
 
+/* the first two suites after the grease slot, read out of a built hello */
+static int hello_suites(tls_fp_t fp, uint16_t *first, uint16_t *second, int grease) {
+    tls_ch_params_t p;
+    memset(&p, 0x11, sizeof p);
+    p.sni = "www.example.com";
+    p.fp = fp;
+    p.p256_pub = NULL;
+    static uint8_t buf[2048];
+    size_t len = 0;
+    if (tls_build_clienthello(&p, buf, sizeof buf, &len) != TLS_CH_OK) return -1;
+    size_t at = 1 + 3 + 2 + TLS_CH_RANDOM_LEN + 1 + TLS_CH_SESSIONID_LEN + 2;
+    if (grease) at += 2;
+    *first = (uint16_t)(buf[at] << 8 | buf[at + 1]);
+    *second = (uint16_t)(buf[at + 2] << 8 | buf[at + 3]);
+    return 0;
+}
+
+static void test_cipher_order(void) {
+    uint16_t a = 0, b = 0;
+    tls_ch_set_prefer_chacha(0);
+    ok("chrome keeps aes first", hello_suites(TLS_FP_CHROME, &a, &b, 1) == 0 &&
+                                 a == 0x1301 && b == 0x1303);
+    tls_ch_set_prefer_chacha(1);
+    ok("chrome without aes hardware", hello_suites(TLS_FP_CHROME, &a, &b, 1) == 0 &&
+                                      a == 0x1303 && b == 0x1301);
+    ok("edge without aes hardware", hello_suites(TLS_FP_EDGE, &a, &b, 1) == 0 &&
+                                    a == 0x1303 && b == 0x1301);
+    ok("randomized prefers chacha", hello_suites(TLS_FP_RANDOMIZED, &a, &b, 0) == 0 &&
+                                    a == 0x1303 && b == 0x1301);
+    ok("firefox is left alone", hello_suites(TLS_FP_FIREFOX, &a, &b, 0) == 0 &&
+                                a == 0x1301 && b == 0x1303);
+    tls_ch_set_prefer_chacha(0);
+
+    daemon_settings_t s;
+    daemon_settings_defaults(&s);
+    ok("chacha on by default", s.prefer_chacha == 1);
+    ok("chacha switch",
+       daemon_settings_set(&s, "prefer_chacha", 13, "0", 1) == SETTINGS_OK &&
+       s.prefer_chacha == 0);
+}
+
 int main(void) {
+    test_cipher_order();
     test_rules();
     test_firewall();
     test_settings();

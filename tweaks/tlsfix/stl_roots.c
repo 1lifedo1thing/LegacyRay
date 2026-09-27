@@ -137,6 +137,6 @@ CFArrayRef stl_roots_anchor_array(void) {
 
     cached = CFArrayCreateCopy(kCFAllocatorDefault, arr);
     CFRelease(arr);
-    stl_log("roots: loaded %ld anchor(s)", (long)CFArrayGetCount(cached));
+    stl_debug("roots: loaded %ld anchor(s)", (long)CFArrayGetCount(cached));
     return (CFArrayRef)CFRetain(cached);
 }

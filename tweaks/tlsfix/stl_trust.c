@@ -56,7 +56,7 @@ static OSStatus stl_SecTrustEvaluate(SecTrustRef trust, SecTrustResultType *resu
         return st;
 
     if (result)
-        stl_log("SecTrustEvaluate system -> os=%d trust=%s",
+        stl_debug("SecTrustEvaluate system -> os=%d trust=%s",
                 (int)st, stl_trust_result_name(*result));
 
     CFArrayRef ours = stl_roots_anchor_array();
@@ -66,7 +66,7 @@ static OSStatus stl_SecTrustEvaluate(SecTrustRef trust, SecTrustResultType *resu
     st = orig_SecTrustEvaluate(trust, result);
     if (!stl_trust_ok(result ? *result : kSecTrustResultInvalid) || st != errSecSuccess) {
         if (result)
-            stl_log("SecTrustEvaluate bundled -> os=%d trust=%s",
+            stl_debug("SecTrustEvaluate bundled -> os=%d trust=%s",
                     (int)st, stl_trust_result_name(*result));
     }
     return st;

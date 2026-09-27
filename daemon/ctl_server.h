@@ -101,6 +101,8 @@ typedef struct {
     size_t out_len;
     size_t out_off;
     uint64_t generation;
+/* WATCH lease: STATE and STAT lines are pushed until this moment */
+    long  watch_until_ms;
 } ctl_client_t;
 
 typedef struct {
@@ -141,6 +143,11 @@ typedef struct {
     char          egress_iface[32];
     char          egress_ip[16];
     long          egress_check_ms;
+/* the routing socket is in the daemon's poll set, so egress checks run when
+   the kernel reports a change instead of on a clock. egress_due_ms is the
+   settle deadline after the last such report, 0 when nothing is pending */
+    int           netwatch_live;
+    long          egress_due_ms;
     long          sub_check_ms;
 /* earliest retry per subscription after a scheduled refresh failed, so a dead
    panel is not pulled every minute */
@@ -150,6 +157,9 @@ typedef struct {
     size_t        ping_active;
     uint64_t      client_generation;
     ctl_client_t  clients[CTL_SERVER_MAX_CLIENTS];
+/* which client each pollfd after the first two belongs to, for dispatch */
+    int           poll_slot[CTL_SERVER_MAX_CLIENTS];
+    size_t        poll_n;
 } ctl_server_t;
 
 typedef enum {
@@ -198,6 +208,22 @@ void ctl_server_tunnel_lost(ctl_server_t *s);
 /* run what has no client behind it: redial backoff, egress changes and
    scheduled subscription refreshes */
 void ctl_server_tick(ctl_server_t *s);
+
+/* ctl_server_step in halves for the daemon's single poll; see loop_prepare */
+#define CTL_SERVER_POLLFD_MAX (2 + CTL_SERVER_MAX_CLIENTS)
+struct pollfd;
+size_t ctl_server_prepare(ctl_server_t *s, struct pollfd *pfd, size_t cap);
+void ctl_server_dispatch(ctl_server_t *s, const struct pollfd *pfd, size_t n);
+
+/* milliseconds until ctl_server_tick or a STAT push has work, -1 for none.
+   an idle daemon with no watchers and no schedule sleeps until a socket
+   wakes it */
+int ctl_server_timeout_ms(ctl_server_t *s);
+
+/* live = 1 when the caller watches the routing socket and will report
+   changes through ctl_server_network_changed */
+void ctl_server_set_netwatch(ctl_server_t *s, int live);
+void ctl_server_network_changed(ctl_server_t *s);
 
 ctls_status_t ctl_server_step(ctl_server_t *s, int timeout_ms);
 

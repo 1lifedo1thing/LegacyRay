@@ -375,7 +375,7 @@ static OSStatus stl_SSLHandshake(SSLContextRef c) {
         return errSSLWouldBlock;
     if (ret == 0) {
         s->state = 2;
-        stl_log("handshake ok: %s [%s] (%s)", s->host,
+        stl_debug("handshake ok: %s [%s] (%s)", s->host,
                 mbedtls_ssl_get_version(&s->ssl),
                 mbedtls_ssl_get_ciphersuite(&s->ssl));
         return noErr;
@@ -604,7 +604,7 @@ static void stl_do_ready(void) {
     g_ca_ok = (mbedtls_x509_crt_parse_file(&g_ca, stl_ca_path) == 0);
     g_trust_set = CFSetCreateMutable(kCFAllocatorDefault, 0, &kCFTypeSetCallBacks);
     g_ready = 1;
-    stl_log("shadow ready drbg=%d ca=%d tls13=%d fallback=%d",
+    stl_debug("shadow ready drbg=%d ca=%d tls13=%d fallback=%d",
             g_drbg_ready, g_ca_ok, g_allow_tls13, g_sys_fallback);
 }
 

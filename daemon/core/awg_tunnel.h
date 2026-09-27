@@ -40,6 +40,12 @@ awg_tun_status_t awg_tunnel_open(awg_tunnel_t *tunnel,
                                  const uint8_t *packet, size_t packet_len,
                                  uint8_t *out, size_t cap, size_t *out_len);
 
+/* the server starts a handshake of its own when it has data for a client
+   whose session aged out. the client here only initiates, so a packet shaped
+   like an initiation is its cue to open a fresh session from this side */
+int awg_tunnel_looks_like_initiation(const awg_tunnel_t *tunnel,
+                                     const uint8_t *packet, size_t packet_len);
+
 #ifdef __cplusplus
 }
 #endif

@@ -39,6 +39,14 @@ typedef struct {
     const uint8_t *p256_pub; /* add the firefox decoy share when available */
 } tls_ch_params_t;
 
+/* legacyray: chrome and edge built on hardware without aes instructions list
+   chacha20-poly1305 ahead of aes-gcm (boringssl orders by EVP_has_aes_hardware),
+   and a go server, xray and reality included, then answers in chacha20. every
+   armv7 iphone is that hardware, where chacha20 costs a fraction of the cycles
+   aes-gcm does. off by default here; the daemon turns it on from settings */
+void tls_ch_set_prefer_chacha(int on);
+int  tls_ch_prefer_chacha(void);
+
 /* serialize the exact hello bytes used by reality aad and tls transcript */
 tls_ch_status_t tls_build_clienthello(const tls_ch_params_t *p,
                                       uint8_t *buf, size_t cap, size_t *out_len);

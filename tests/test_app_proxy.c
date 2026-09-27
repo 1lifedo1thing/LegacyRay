@@ -34,6 +34,10 @@ void stl_log(const char *fmt, ...) {
     (void)fmt;
 }
 
+void stl_debug(const char *fmt, ...) {
+    (void)fmt;
+}
+
 static int exact_read(int fd, uint8_t *buf, size_t len) {
     size_t off = 0;
     while (off < len) {

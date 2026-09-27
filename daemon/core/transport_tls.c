@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include <openssl/ssl.h>
+#include "tls_clienthello.h"
 #include <openssl/err.h>
 #include "../../common/senko_paths.h"
 
@@ -39,8 +40,15 @@ static void *tls_open(int fd, const transport_tls_cfg_t *cfg) {
    binary h2 frame as a plaintext response */
     static const unsigned char alpn[] = "\x08http/1.1";
     SSL_CTX_set_alpn_protos(h->ctx, alpn, sizeof alpn - 1);
-    SSL_CTX_set_ciphersuites(h->ctx,
-        "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256");
+    SSL_CTX_set_ciphersuites(h->ctx, tls_ch_prefer_chacha()
+        ? "TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384"
+        : "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256");
+    if (tls_ch_prefer_chacha())
+        SSL_CTX_set_cipher_list(h->ctx,
+            "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:"
+            "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:"
+            "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:"
+            "ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384");
     SSL_CTX_set1_groups_list(h->ctx, "X25519:P-256:P-384");
 
     int reality = (cfg && cfg->reality_pbk && cfg->reality_pbk[0]);

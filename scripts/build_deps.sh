@@ -64,7 +64,7 @@ unpack "${MBED_TBZ}" "${MBED_SRC}"
 
 build_openssl_armv7() {
   local prefix="${DEPS}/openssl-armv7"
-  local marker="${prefix}/.built-${OPENSSL_VERSION}-ios${MIN}"
+  local marker="${prefix}/.built-${OPENSSL_VERSION}-ios${MIN}-neon"
   if [[ -f "${marker}" ]]; then echo "openssl armv7 up to date"; return; fi
   local bld="${DEPS}/build/openssl-armv7"
   rm -rf "${bld}" "${prefix}"
@@ -77,13 +77,30 @@ build_openssl_armv7() {
     mkdir -p cross/SDKs
     ln -sfn "${SDK}" cross/SDKs/iPhoneOS.sdk
     export CROSS_TOP="${bld}/cross" CROSS_SDK="iPhoneOS.sdk"
-    # no-asm: the perlasm armv7 paths assume a newer assembler than old ios
-    # accepts; no-async: ucontext is missing from the ios sdk
+    # the neon assembly (chacha20, poly1305, bit-sliced aes, ghash, sha,
+    # montgomery) needs several times fewer cycles per byte than the portable
+    # c, and on a phone every cycle spent on crypto is battery.
+    # no-async: ucontext is missing from the ios sdk
     "${OSSL_SRC}/Configure" ios-cross \
-      "CC=${bld}/cc" "AR=${TC}/llvm-ar" "RANLIB=${TC}/llvm-ranlib" \
-      no-asm no-async no-shared no-dso no-tests no-engine no-ui-console \
+      "CC=${bld}/cc" "AR=${TC}/llvm-ar" "RANLIB=${TC}/ranlib" \
+      no-async no-shared no-dso no-tests no-engine no-ui-console \
       no-docs no-apps no-quic no-comp -DBROKEN_CLANG_ATOMICS \
       -O2 -fno-strict-aliasing --prefix="${prefix}" >/dev/null
+    # openssl 3 lost the ios32 flavour of the armcap reference: the armv4
+    # modules write ".word OPENSSL_armcap_P-.Lfunc", which a mach-o assembler
+    # cannot encode for an undefined symbol. their __APPLE__ code already
+    # dereferences a pointer at that spot, so the fix is to point the word at
+    # a local non-lazy symbol pointer, the way openssl 1.x generated it
+    local asm_targets
+    asm_targets=$(sed -n 's/^\(crypto\/[^: ]*\.S\):.*/\1/p' Makefile | sort -u)
+    # shellcheck disable=SC2086
+    make -j"${JOBS}" ${asm_targets} >/dev/null
+    local f
+    for f in ${asm_targets}; do
+      grep -q 'OPENSSL_armcap_P-' "${f}" || continue
+      perl -0pi -e 's/(\.word\s+)OPENSSL_armcap_P-/$1L_OPENSSL_armcap_P\$non_lazy_ptr-/g' "${f}"
+      printf '\n#if __ARM_MAX_ARCH__>=7\n.non_lazy_symbol_pointer\nL_OPENSSL_armcap_P$non_lazy_ptr:\n.indirect_symbol\t_OPENSSL_armcap_P\n.long\t0\n#endif\n' >> "${f}"
+    done
     make -j"${JOBS}" build_libs >/dev/null
     cp libssl.a libcrypto.a "${prefix}/lib/"
     mkdir -p "${prefix}/include"

@@ -126,18 +126,19 @@ awg_tun_status_t awg_tunnel_open(awg_tunnel_t *tunnel,
         read_le32(hdr + 4) != tunnel->handshake.sender_index)
         return AWG_TUN_ERR_FORMAT;
     uint64_t counter = read_le64(hdr + 8);
+/* the window only moves once the packet authenticates; a forged counter far
+   ahead would otherwise push every genuine packet out of it */
+    uint64_t window = 1;
     if (tunnel->have_recv_counter) {
         if (counter > tunnel->recv_counter) {
             uint64_t shift = counter - tunnel->recv_counter;
-            tunnel->recv_window = shift >= 64 ? 1 : (tunnel->recv_window << shift) | 1U;
+            window = shift >= 64 ? 1 : (tunnel->recv_window << shift) | 1U;
         } else {
             uint64_t distance = tunnel->recv_counter - counter;
             if (distance >= 64 || (tunnel->recv_window & (UINT64_C(1) << distance)))
                 return AWG_TUN_ERR_REPLAY;
-            tunnel->recv_window |= UINT64_C(1) << distance;
+            window = tunnel->recv_window | (UINT64_C(1) << distance);
         }
-    } else {
-        tunnel->recv_window = 1;
     }
     size_t plain_len = packet_len - prefix - AWG_TRANSPORT_FIXED;
     if (plain_len > cap) return AWG_TUN_ERR_SPACE;
@@ -147,9 +148,22 @@ awg_tun_status_t awg_tunnel_open(awg_tunnel_t *tunnel,
                                       wire + 16, plain_len, wire + 16 + plain_len, out) == RC_OK;
     OPENSSL_cleanse(nonce, sizeof nonce);
     if (!ok) return AWG_TUN_ERR_AUTH;
+    tunnel->recv_window = window;
     if (!tunnel->have_recv_counter || counter > tunnel->recv_counter)
         tunnel->recv_counter = counter;
     tunnel->have_recv_counter = 1;
     *out_len = inner_packet_length(out, plain_len);
     return AWG_TUN_OK;
+}
+
+int awg_tunnel_looks_like_initiation(const awg_tunnel_t *tunnel,
+                                     const uint8_t *packet, size_t packet_len) {
+    if (!tunnel || !tunnel->handshake.cfg || !packet) return 0;
+    const awg_config_t *cfg = tunnel->handshake.cfg;
+/* 148 bytes of initiation behind the s1 junk prefix. with header protection
+   the type word is masked, so the length alone has to do */
+    if (packet_len != (size_t)cfg->padding[0] + 148U) return 0;
+    if (cfg->has_header_protection) return 1;
+    uint32_t header = read_le32(packet + cfg->padding[0]);
+    return header >= cfg->header_min[0] && header <= cfg->header_max[0];
 }

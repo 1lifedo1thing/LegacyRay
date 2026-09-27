@@ -25,15 +25,55 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <unistd.h>
+#include "netwatch.h"
 
 static volatile sig_atomic_t g_stop = 0;
-static void on_signal(int sig) { (void)sig; g_stop = 1; }
+/* the managed loop can sleep in poll for minutes, so a stop request also
+   writes to a pipe that is part of the poll set; a signal landing between the
+   g_stop check and poll would otherwise wait for launchd's SIGKILL and leave
+   the firewall rules behind */
+static int g_sig_pipe[2] = { -1, -1 };
+
+static void on_signal(int sig) {
+    (void)sig;
+    g_stop = 1;
+    if (g_sig_pipe[1] >= 0) {
+        char b = 's';
+        ssize_t n = write(g_sig_pipe[1], &b, 1);
+        (void)n;
+    }
+}
+
+static void open_signal_pipe(void) {
+    if (g_sig_pipe[0] >= 0) return;
+    if (pipe(g_sig_pipe) != 0) { g_sig_pipe[0] = g_sig_pipe[1] = -1; return; }
+    for (int i = 0; i < 2; ++i) {
+        int fl = fcntl(g_sig_pipe[i], F_GETFL, 0);
+        if (fl >= 0) (void)fcntl(g_sig_pipe[i], F_SETFL, fl | O_NONBLOCK);
+        (void)fcntl(g_sig_pipe[i], F_SETFD, FD_CLOEXEC);
+    }
+}
 
 static void install_signals(void) {
     signal(SIGPIPE, SIG_IGN); /* ignore broken client sockets */
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
+}
+
+/* nothing scheduled still wakes the daemon once in a long while, so a
+   deadline some module forgot to report costs minutes, not a hang */
+#define DAEMON_IDLE_CAP_MS (15 * 60 * 1000)
+
+static int daemon_idle_timeout(int a, int b, int c) {
+    int best = -1;
+    int v[3] = { a, b, c };
+    for (int i = 0; i < 3; ++i)
+        if (v[i] >= 0 && (best < 0 || v[i] < best)) best = v[i];
+    if (best < 0 || best > DAEMON_IDLE_CAP_MS) best = DAEMON_IDLE_CAP_MS;
+    return best;
 }
 
 static int run_single(const char *link, int port) {
@@ -204,15 +244,67 @@ static int run_managed(const char *ctl_path, const char *config_path,
             fprintf(stderr, "legacyrayd: auto-connect found no server to start\n");
     }
 
+/* one poll over everything the daemon listens to, with a timeout that
+   reaches the next thing actually scheduled. the loop used to take turns
+   between two 50 ms polls, which woke the phone ten times a second around
+   the clock, tunnel or not, and added up to 50 ms to every packet that
+   arrived while the other half was waiting */
+    open_signal_pipe();
+    int route_fd = netwatch_open();
+    ctl_server_set_netwatch(&cs, route_fd >= 0);
+    if (route_fd < 0)
+        fprintf(stderr, "legacyrayd: no routing socket; network moves are polled\n");
+
+    static struct pollfd pfd[LOOP_POLLFD_MAX + CTL_SERVER_POLLFD_MAX + 2];
     while (!g_stop) {
-        if (loop_step(&lp, 50) != LOOP_OK) break;
-        ctl_server_step(&cs, 50);
+        size_t nl = loop_prepare(&lp, pfd, LOOP_POLLFD_MAX);
+        size_t nc = ctl_server_prepare(&cs, pfd + nl, CTL_SERVER_POLLFD_MAX);
+        size_t nf = nl + nc;
+        int sig_idx = -1, route_idx = -1;
+        if (g_sig_pipe[0] >= 0) {
+            sig_idx = (int)nf;
+            pfd[nf].fd = g_sig_pipe[0]; pfd[nf].events = POLLIN; pfd[nf].revents = 0;
+            nf++;
+        }
+        if (route_fd >= 0) {
+            route_idx = (int)nf;
+            pfd[nf].fd = route_fd; pfd[nf].events = POLLIN; pfd[nf].revents = 0;
+            nf++;
+        }
+
+        int timeout = daemon_idle_timeout(loop_timeout_ms(&lp),
+                                          ctl_server_timeout_ms(&cs),
+                                          daemon_ctl_timeout_ms(&dc));
+        if (g_stop) break;
+        int r = poll(pfd, (nfds_t)nf, timeout);
+        if (r < 0 && errno != EINTR) {
+            fprintf(stderr, "legacyrayd: poll failed: %s\n", strerror(errno));
+            break;
+        }
+        if (r > 0) {
+            loop_dispatch(&lp, pfd, nl);
+            ctl_server_dispatch(&cs, pfd + nl, nc);
+            if (sig_idx >= 0 && (pfd[sig_idx].revents & POLLIN)) {
+                char drain[16];
+                while (read(g_sig_pipe[0], drain, sizeof drain) > 0) {}
+            }
+            if (route_idx >= 0 && pfd[route_idx].revents) {
+                int moved = netwatch_drain(route_fd);
+                if (moved > 0) ctl_server_network_changed(&cs);
+                if (moved < 0) {
+                    netwatch_close(route_fd);
+                    route_fd = netwatch_open();
+                    ctl_server_set_netwatch(&cs, route_fd >= 0);
+                }
+            }
+        }
 /* the backend can die between two control commands, and the redial schedule
    lives with the store that knows which server to dial */
         if (daemon_ctl_maintain(&dc) != 0)
             ctl_server_tunnel_lost(&cs);
         ctl_server_tick(&cs);
     }
+    netwatch_close(route_fd);
 
     fprintf(stderr, "legacyrayd: shutting down\n");
     daemon_ctl_shutdown(&dc);

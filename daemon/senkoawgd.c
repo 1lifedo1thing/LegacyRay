@@ -23,15 +23,58 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-static volatile sig_atomic_t g_stop;
+#if defined(__APPLE__)
+#include <fcntl.h>
+#include <notify.h>
+#endif
 
-#define AWG_REKEY_INTERVAL_MS 120000L
-#define AWG_REKEY_RETRY_MS 5000L
+static volatile sig_atomic_t g_stop;
+static int g_sig_pipe[2] = { -1, -1 };
+
+/* the wireguard timers (whitepaper section 6): a sender opens a new session
+   once the current one is two minutes old, a receiver a little before the
+   three minute hard limit, and a session nobody uses is left to expire. the
+   old loop rekeyed every two minutes whether or not a single packet moved,
+   which kept the cellular radio waking up all night for nothing */
+#define AWG_REKEY_AFTER_MS        120000L
+#define AWG_REJECT_AFTER_MS       180000L
+#define AWG_REKEY_ON_RECEIVE_MS   (AWG_REJECT_AFTER_MS - 10000L - 5000L)
+#define AWG_REKEY_RETRY_MS          5000L
+#define AWG_REKEY_ATTEMPT_MS       90000L
 #define AWG_STATUS_PATH "/var/run/legacyrayawgd.status"
+#define AWG_STATUS_NOTIFY "com.legacyray.awg.status"
+/* the app owns this file; one line, awg_keepalive=config|screen|off */
+#define AWG_POWER_PATH "/var/mobile/Library/Preferences/LegacyRay/power.conf"
+
+typedef enum {
+    AWG_KEEPALIVE_CONFIG = 0, /* what the profile says */
+    AWG_KEEPALIVE_SCREEN,     /* only while the screen is on */
+    AWG_KEEPALIVE_OFF
+} awg_keepalive_mode_t;
 
 static void on_signal(int signal_number) {
     (void)signal_number;
     g_stop = 1;
+    if (g_sig_pipe[1] >= 0) {
+        char b = 's';
+        ssize_t n = write(g_sig_pipe[1], &b, 1);
+        (void)n;
+    }
+}
+
+static awg_keepalive_mode_t read_keepalive_mode(void) {
+    FILE *f = fopen(AWG_POWER_PATH, "r");
+    if (!f) return AWG_KEEPALIVE_CONFIG;
+    char line[128];
+    awg_keepalive_mode_t mode = AWG_KEEPALIVE_CONFIG;
+    while (fgets(line, sizeof line, f)) {
+        if (strncmp(line, "awg_keepalive=", 14) != 0) continue;
+        if (strncmp(line + 14, "screen", 6) == 0) mode = AWG_KEEPALIVE_SCREEN;
+        else if (strncmp(line + 14, "off", 3) == 0) mode = AWG_KEEPALIVE_OFF;
+        else mode = AWG_KEEPALIVE_CONFIG;
+    }
+    fclose(f);
+    return mode;
 }
 
 static void write_status(const char *text) {
@@ -39,6 +82,10 @@ static void write_status(const char *text) {
     if (!f) return;
     fprintf(f, "%s\n", text);
     fclose(f);
+#if defined(__APPLE__)
+/* the app listens for this instead of asking the setuid helper every second */
+    (void)notify_post(AWG_STATUS_NOTIFY);
+#endif
 }
 
 static void usage(const char *argv0) {
@@ -148,6 +195,14 @@ static int run_tunnel(const awg_config_t *cfg, int timeout_ms) {
         return 1;
     }
 
+    if (pipe(g_sig_pipe) == 0) {
+        for (int i = 0; i < 2; ++i) {
+            int fl = fcntl(g_sig_pipe[i], F_GETFL, 0);
+            if (fl >= 0) (void)fcntl(g_sig_pipe[i], F_SETFL, fl | O_NONBLOCK);
+        }
+    } else {
+        g_sig_pipe[0] = g_sig_pipe[1] = -1;
+    }
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
     static uint8_t framed[AWG_DATAGRAM_MAX + 4];
@@ -155,59 +210,67 @@ static int run_tunnel(const awg_config_t *cfg, int timeout_ms) {
     static uint8_t inner[AWG_DATAGRAM_MAX];
     fprintf(stderr, "legacyrayawgd: linked %s to %s:%u\n",
             ifname, cfg->endpoint_host, cfg->endpoint_port);
-    write_status("connected");
+    {
+        char status[64];
+        snprintf(status, sizeof status, "connected %s", ifname);
+        write_status(status);
+    }
     status_set(1);
-    long last_tx_ms = monotonic_millis();
-    long last_handshake_ms = last_tx_ms;
+
+    awg_keepalive_mode_t ka_mode = read_keepalive_mode();
+    int screen_fd = -1, screen_token = 0, screen_off = 0;
+#if defined(__APPLE__)
+/* springboard posts this when the display blanks and unblanks; the state
+   says which. registered only when the keepalive depends on it */
+    if (ka_mode == AWG_KEEPALIVE_SCREEN && cfg->persistent_keepalive &&
+        notify_register_file_descriptor("com.apple.springboard.hasBlankedScreen",
+                                        &screen_fd, 0, &screen_token) == NOTIFY_STATUS_OK) {
+        uint64_t st = 0;
+        if (notify_get_state(screen_token, &st) == NOTIFY_STATUS_OK) screen_off = st != 0;
+        int fl = fcntl(screen_fd, F_GETFL, 0);
+        if (fl >= 0) (void)fcntl(screen_fd, F_SETFL, fl | O_NONBLOCK);
+    } else {
+        screen_fd = -1;
+    }
+#endif
+    fprintf(stderr, "legacyrayawgd: keepalive %us, mode %s\n", cfg->persistent_keepalive,
+            ka_mode == AWG_KEEPALIVE_OFF ? "off" :
+            ka_mode == AWG_KEEPALIVE_SCREEN ? "screen on only" : "as configured");
+
+    long now_ms = monotonic_millis();
+    long last_tx_ms = now_ms;
+    long last_handshake_ms = now_ms;
     long last_rekey_attempt_ms = 0;
+    long rekey_wanted_since = 0; /* 0 when no traffic is asking for a session */
+    int keys_dead_logged = 0;
     while (!g_stop) {
-        struct pollfd pfd[2];
-        pfd[0].fd = tun_fd; pfd[0].events = POLLIN; pfd[0].revents = 0;
-        pfd[1].fd = udp_fd; pfd[1].events = POLLIN; pfd[1].revents = 0;
-        int pr = poll(pfd, 2, 1000);
-        if (pr < 0 && errno == EINTR) continue;
-        if (pr < 0) break;
-        if (pfd[0].revents & POLLIN) {
-            ssize_t got = read(tun_fd, framed, sizeof framed);
-            if (got > 4) {
+        now_ms = monotonic_millis();
+        long key_age = now_ms - last_handshake_ms;
+        int keepalive_s = cfg->persistent_keepalive;
+        if (ka_mode == AWG_KEEPALIVE_OFF || (ka_mode == AWG_KEEPALIVE_SCREEN && screen_off))
+            keepalive_s = 0;
+
+/* a keepalive is a send like any other, so it may be the thing that asks
+   for a new session */
+        if (keepalive_s && now_ms - last_tx_ms >= (long)keepalive_s * 1000L) {
+            if (key_age >= AWG_REKEY_AFTER_MS && !rekey_wanted_since)
+                rekey_wanted_since = now_ms;
+            if (key_age < AWG_REJECT_AFTER_MS) {
                 size_t wire_len = 0;
-                awg_tun_status_t tr = awg_tunnel_seal(&tunnel, framed + 4,
-                                                       (size_t)got - 4,
-                                                       wire, sizeof wire, &wire_len);
-                if (tr == AWG_TUN_OK) {
-                    if (send(udp_fd, wire, wire_len, 0) != (ssize_t)wire_len) break;
-                    last_tx_ms = monotonic_millis();
-                }
+                if (awg_tunnel_seal(&tunnel, NULL, 0, wire, sizeof wire, &wire_len) != AWG_TUN_OK ||
+                    send(udp_fd, wire, wire_len, 0) != (ssize_t)wire_len)
+                    break;
             }
+            last_tx_ms = now_ms;
         }
-        if (pfd[1].revents & POLLIN) {
-            ssize_t got = recv(udp_fd, wire, sizeof wire, 0);
-            if (got > 0) {
-                size_t inner_len = 0;
-                awg_tun_status_t tr = awg_tunnel_open(&tunnel, wire, (size_t)got,
-                                                       inner, sizeof inner, &inner_len);
-                if (tr == AWG_TUN_OK && inner_len > 0) {
-                    uint8_t version = inner[0] >> 4;
-                    if (version == 4 || version == 6) {
-                        uint32_t family = htonl(version == 4 ? AF_INET : AF_INET6);
-                        memcpy(framed, &family, sizeof family);
-                        memcpy(framed + 4, inner, inner_len);
-                        if (write_all(tun_fd, framed, inner_len + 4) != 0) break;
-                    }
-                }
-            }
+
+        if (rekey_wanted_since && now_ms - rekey_wanted_since > AWG_REKEY_ATTEMPT_MS) {
+/* nobody sent anything for the whole attempt window; stop knocking until
+   traffic comes back */
+            fprintf(stderr, "legacyrayawgd: rekey abandoned, the tunnel is idle\n");
+            rekey_wanted_since = 0;
         }
-        if (cfg->persistent_keepalive &&
-            monotonic_millis() - last_tx_ms >= (long)cfg->persistent_keepalive * 1000L) {
-            size_t wire_len = 0;
-            if (awg_tunnel_seal(&tunnel, NULL, 0, wire, sizeof wire, &wire_len) != AWG_TUN_OK ||
-                send(udp_fd, wire, wire_len, 0) != (ssize_t)wire_len)
-                break;
-            last_tx_ms = monotonic_millis();
-        }
-        long now_ms = monotonic_millis();
-        if (now_ms - last_handshake_ms >= AWG_REKEY_INTERVAL_MS &&
-            now_ms - last_rekey_attempt_ms >= AWG_REKEY_RETRY_MS) {
+        if (rekey_wanted_since && now_ms - last_rekey_attempt_ms >= AWG_REKEY_RETRY_MS) {
             last_rekey_attempt_ms = now_ms;
             awg_handshake_t refreshed;
             if (awg_handshake_establish_fd(udp_fd, cfg, timeout_ms, &refreshed,
@@ -218,14 +281,121 @@ static int run_tunnel(const awg_config_t *cfg, int timeout_ms) {
                 tunnel.recv_counter = 0;
                 tunnel.recv_window = 0;
                 tunnel.have_recv_counter = 0;
+                now_ms = monotonic_millis();
                 last_handshake_ms = now_ms;
                 last_tx_ms = now_ms;
+                rekey_wanted_since = 0;
+                keys_dead_logged = 0;
+                key_age = 0;
             } else {
                 OPENSSL_cleanse(&refreshed, sizeof refreshed);
                 fprintf(stderr, "legacyrayawgd: rekey deferred: %s\n", reason);
+                now_ms = monotonic_millis();
+            }
+        }
+
+        long wait_ms = -1;
+#define AWG_WAIT(v) do { long _v = (v); if (_v < 0) _v = 0; \
+                         if (wait_ms < 0 || _v < wait_ms) wait_ms = _v; } while (0)
+        if (keepalive_s) AWG_WAIT(last_tx_ms + (long)keepalive_s * 1000L - now_ms);
+        if (rekey_wanted_since) {
+            AWG_WAIT(last_rekey_attempt_ms + AWG_REKEY_RETRY_MS - now_ms);
+            AWG_WAIT(rekey_wanted_since + AWG_REKEY_ATTEMPT_MS + 1 - now_ms);
+        }
+#undef AWG_WAIT
+
+        struct pollfd pfd[4];
+        nfds_t np = 0;
+        pfd[np].fd = tun_fd; pfd[np].events = POLLIN; pfd[np].revents = 0; np++;
+        pfd[np].fd = udp_fd; pfd[np].events = POLLIN; pfd[np].revents = 0; np++;
+        int sig_i = -1, screen_i = -1;
+        if (g_sig_pipe[0] >= 0) {
+            sig_i = (int)np;
+            pfd[np].fd = g_sig_pipe[0]; pfd[np].events = POLLIN; pfd[np].revents = 0; np++;
+        }
+        if (screen_fd >= 0) {
+            screen_i = (int)np;
+            pfd[np].fd = screen_fd; pfd[np].events = POLLIN; pfd[np].revents = 0; np++;
+        }
+        if (g_stop) break;
+        int pr = poll(pfd, np, wait_ms < 0 ? -1 : (int)(wait_ms > 600000 ? 600000 : wait_ms));
+        if (pr < 0 && errno == EINTR) continue;
+        if (pr < 0) break;
+        if (pr == 0) continue;
+        now_ms = monotonic_millis();
+        key_age = now_ms - last_handshake_ms;
+
+        if (sig_i >= 0 && pfd[sig_i].revents) {
+            char drain[16];
+            while (read(g_sig_pipe[0], drain, sizeof drain) > 0) {}
+        }
+#if defined(__APPLE__)
+        if (screen_i >= 0 && pfd[screen_i].revents) {
+            int token = 0;
+            while (read(screen_fd, &token, sizeof token) == (ssize_t)sizeof token) {}
+            uint64_t st = 0;
+            if (notify_get_state(screen_token, &st) == NOTIFY_STATUS_OK) {
+                int off = st != 0;
+                if (off != screen_off) {
+                    screen_off = off;
+/* waking up after a dark stretch: one keepalive now refreshes the nat
+   mapping the silence may have let go */
+                    if (!screen_off) last_tx_ms = 0;
+                }
+            }
+        }
+#endif
+        if (pfd[0].revents & POLLIN) {
+            ssize_t got = read(tun_fd, framed, sizeof framed);
+            if (got > 4) {
+                if (key_age >= AWG_REKEY_AFTER_MS && !rekey_wanted_since)
+                    rekey_wanted_since = now_ms;
+                if (key_age < AWG_REJECT_AFTER_MS) {
+                    size_t wire_len = 0;
+                    awg_tun_status_t tr = awg_tunnel_seal(&tunnel, framed + 4,
+                                                           (size_t)got - 4,
+                                                           wire, sizeof wire, &wire_len);
+                    if (tr == AWG_TUN_OK) {
+                        if (send(udp_fd, wire, wire_len, 0) != (ssize_t)wire_len) break;
+                        last_tx_ms = now_ms;
+                    }
+                } else if (!keys_dead_logged) {
+/* the session is past its hard limit; packets wait for the new one the
+   rekey above is already asking for, as wireguard would */
+                    fprintf(stderr, "legacyrayawgd: session expired, waiting for a new handshake\n");
+                    keys_dead_logged = 1;
+                }
+            }
+        }
+        if (pfd[1].revents & POLLIN) {
+            ssize_t got = recv(udp_fd, wire, sizeof wire, 0);
+            if (got > 0) {
+                size_t inner_len = 0;
+                awg_tun_status_t tr = awg_tunnel_open(&tunnel, wire, (size_t)got,
+                                                       inner, sizeof inner, &inner_len);
+                if (tr == AWG_TUN_OK) {
+                    if (key_age >= AWG_REKEY_ON_RECEIVE_MS && !rekey_wanted_since)
+                        rekey_wanted_since = now_ms;
+                    if (inner_len > 0) {
+                        uint8_t version = inner[0] >> 4;
+                        if (version == 4 || version == 6) {
+                            uint32_t family = htonl(version == 4 ? AF_INET : AF_INET6);
+                            memcpy(framed, &family, sizeof family);
+                            memcpy(framed + 4, inner, inner_len);
+                            if (write_all(tun_fd, framed, inner_len + 4) != 0) break;
+                        }
+                    }
+                } else if (tr == AWG_TUN_ERR_FORMAT &&
+                           awg_tunnel_looks_like_initiation(&tunnel, wire, (size_t)got)) {
+/* the server has something for us and no session to send it in */
+                    if (!rekey_wanted_since) rekey_wanted_since = now_ms;
+                }
             }
         }
     }
+#if defined(__APPLE__)
+    if (screen_fd >= 0) notify_cancel(screen_token);
+#endif
     awg_route_plan_down(&route_plan);
     status_set(0);
     write_status(g_stop ? "idle" : "error tunnel stopped");

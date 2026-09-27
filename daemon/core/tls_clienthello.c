@@ -198,12 +198,21 @@ static void ext_alps_h2(w_t *w) {
     w_u16(w, 0x4469); w_u16(w, (uint16_t)sizeof d); w_bytes(w, d, sizeof d);
 }
 
+static int g_prefer_chacha;
+
+void tls_ch_set_prefer_chacha(int on) { g_prefer_chacha = on ? 1 : 0; }
+int  tls_ch_prefer_chacha(void) { return g_prefer_chacha; }
+
 static void ciphers_chrome(w_t *w, uint16_t grease) {
     static const uint16_t c[] = {0x1301,0x1303,0xc02b,0xc02f,0xc02c,0xc030,
         0xcca9,0xcca8,0xc013,0xc014,0x009c,0x009d,0x002f,0x0035};
+/* the same browser on a cpu without aes: chacha first in both lists */
+    static const uint16_t c_noaes[] = {0x1303,0x1301,0xcca9,0xcca8,0xc02b,0xc02f,
+        0xc02c,0xc030,0xc013,0xc014,0x009c,0x009d,0x002f,0x0035};
+    const uint16_t *list = g_prefer_chacha ? c_noaes : c;
     size_t at = w_mark_u16(w);
       w_u16(w, grease);
-      for (size_t i = 0; i < sizeof c / sizeof c[0]; i++) w_u16(w, c[i]);
+      for (size_t i = 0; i < sizeof c / sizeof c[0]; i++) w_u16(w, list[i]);
     w_patch_u16(w, at);
 }
 static void ciphers_firefox(w_t *w) {
@@ -216,14 +225,18 @@ static void ciphers_firefox(w_t *w) {
 static void ciphers_edge(w_t *w, uint16_t grease) {
     static const uint16_t c[] = {0x1301,0x1302,0x1303,0xc02b,0xc02f,0xc02c,
         0xc030,0xcca9,0xcca8,0xc013,0xc014,0x002f,0x0035};
+    static const uint16_t c_noaes[] = {0x1303,0x1301,0x1302,0xcca9,0xcca8,0xc02b,
+        0xc02f,0xc02c,0xc030,0xc013,0xc014,0x002f,0x0035};
+    const uint16_t *list = g_prefer_chacha ? c_noaes : c;
     size_t at = w_mark_u16(w);
       w_u16(w, grease);
-      for (size_t i = 0; i < sizeof c / sizeof c[0]; i++) w_u16(w, c[i]);
+      for (size_t i = 0; i < sizeof c / sizeof c[0]; i++) w_u16(w, list[i]);
     w_patch_u16(w, at);
 }
 static void ciphers_min(w_t *w) { /* randomized: 1301 + 1303 (our two) */
     size_t at = w_mark_u16(w);
-      w_u16(w, 0x1301); w_u16(w, 0x1303);
+      if (g_prefer_chacha) { w_u16(w, 0x1303); w_u16(w, 0x1301); }
+      else                 { w_u16(w, 0x1301); w_u16(w, 0x1303); }
     w_patch_u16(w, at);
 }
 

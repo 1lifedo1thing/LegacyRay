@@ -8,6 +8,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <ifaddrs.h>
 #include <net/if.h>
@@ -823,12 +824,35 @@ static int dns_questions_match(const dns_question_t *query,
            strcmp(query->name, response->name) == 0;
 }
 
+/* expired bypass addresses only cost a stale pf table entry, so they are
+   swept on this cadence while there are any, and never while there are none */
+#define DNS_CLEANUP_SECONDS 30
+
+static void dns_wake(routing_exec_t *st) {
+    if (!st || !st->dns_wake_ok) return;
+    char b = 'w';
+    ssize_t n = write(st->dns_wake[1], &b, 1);
+    (void)n; /* a full pipe is already a pending wake */
+}
+
+static int dns_sleep_ms(routing_exec_t *st, uint64_t now, uint64_t next_cleanup) {
+    if (!st->pf_table_ready) return -1;
+    pf_table_counts_t counts;
+    pf_table_counts(&g_pf_table, &counts);
+    if (!counts.addresses && !counts.refs) return -1;
+    if (next_cleanup <= now) return 0;
+    uint64_t left = next_cleanup - now;
+    return left > 3600 ? 3600 * 1000 : (int)(left * 1000);
+}
+
 static void *dns_forwarder_thread(void *arg) {
     routing_exec_t *st = (routing_exec_t *)arg;
     if (!st || !st->dns_bound) return NULL;
     int udp_fd = st->dns_fd;
     int tcp_fd = -1;
-    uint64_t next_cleanup = monotonic_seconds() + 10;
+    uint64_t next_cleanup = monotonic_seconds() + DNS_CLEANUP_SECONDS;
+/* poll says a datagram is waiting before recvfrom runs; the timeout only
+   bounds a read that raced a reset */
     struct timeval timeout;
     timeout.tv_sec = 1;
     timeout.tv_usec = 0;
@@ -857,8 +881,26 @@ static void *dns_forwarder_thread(void *arg) {
         }
         if (now >= next_cleanup) {
             dns_cleanup_pf(st, now);
-            next_cleanup = now + 10;
+            next_cleanup = now + DNS_CLEANUP_SECONDS;
         }
+
+        struct pollfd wait[2];
+        nfds_t nwait = 0;
+        wait[nwait].fd = udp_fd; wait[nwait].events = POLLIN; wait[nwait].revents = 0;
+        nwait++;
+        if (st->dns_wake_ok) {
+            wait[nwait].fd = st->dns_wake[0]; wait[nwait].events = POLLIN;
+            wait[nwait].revents = 0;
+            nwait++;
+        }
+        int pr = poll(wait, nwait, dns_sleep_ms(st, now, next_cleanup));
+        if (pr <= 0) continue; /* timeout or signal: the top of the loop has the work */
+        if (nwait > 1 && wait[1].revents) {
+            char drain[32];
+            while (read(st->dns_wake[0], drain, sizeof drain) > 0) {}
+        }
+        if (!(wait[0].revents & POLLIN)) continue;
+        now = monotonic_seconds();
 
         struct sockaddr_in client_address;
         socklen_t client_len = sizeof client_address;
@@ -957,21 +999,41 @@ static void *dns_forwarder_thread(void *arg) {
     return NULL;
 }
 
+static void close_dns_wake(routing_exec_t *st) {
+    if (!st->dns_wake_ok) return;
+    close(st->dns_wake[0]);
+    close(st->dns_wake[1]);
+    st->dns_wake[0] = st->dns_wake[1] = -1;
+    st->dns_wake_ok = 0;
+}
+
 static int start_dns_forwarder(routing_exec_t *st) {
     if (st->dns_thread) return 0;
     if (!st->dns_bound) return -1;
     st->dns_stop = 0;
-    if (pthread_create(&st->dns_thread, NULL, dns_forwarder_thread, st) != 0)
+    if (!st->dns_wake_ok && pipe(st->dns_wake) == 0) {
+        for (int i = 0; i < 2; ++i) {
+            int fl = fcntl(st->dns_wake[i], F_GETFL, 0);
+            if (fl >= 0) (void)fcntl(st->dns_wake[i], F_SETFL, fl | O_NONBLOCK);
+            (void)fcntl(st->dns_wake[i], F_SETFD, FD_CLOEXEC);
+        }
+        st->dns_wake_ok = 1;
+    }
+    if (pthread_create(&st->dns_thread, NULL, dns_forwarder_thread, st) != 0) {
+        close_dns_wake(st);
         return -1;
+    }
     return 0;
 }
 
 static void stop_dns_forwarder(routing_exec_t *st) {
     if (st->dns_thread) {
         st->dns_stop = 1;
+        dns_wake(st);
         pthread_join(st->dns_thread, NULL);
         st->dns_thread = 0;
     }
+    close_dns_wake(st);
     close_dns_socket(st);
 }
 
@@ -1133,6 +1195,7 @@ void routing_exec_bypass_stats(pf_table_counts_t *counts,
 void routing_exec_flush_dns(routing_exec_t *st) {
     if (st && st->dns_thread) {
         st->flush_dns_requested = 1;
+        dns_wake(st);
         return;
     }
     dns_cache_clear(&g_dns_cache);
@@ -1141,6 +1204,7 @@ void routing_exec_flush_dns(routing_exec_t *st) {
 void routing_exec_flush_bypass(routing_exec_t *st) {
     if (st && st->dns_thread) {
         st->flush_bypass_requested = 1;
+        dns_wake(st);
         return;
     }
     pf_table_clear(&g_pf_table);
