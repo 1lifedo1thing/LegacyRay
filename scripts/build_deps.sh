@@ -18,6 +18,7 @@ MIN="${LR_IOS_MIN:-4.0}"
 DEPS="${LR_DEPS:-${XDG_CACHE_HOME:-$HOME/.cache}/legacyray-deps}"
 OPENSSL_VERSION="${OPENSSL_VERSION:-3.5.8}"
 MBEDTLS_VERSION="${MBEDTLS_VERSION:-3.6.7}"
+LIBSSH2_VERSION="${LIBSSH2_VERSION:-1.11.1}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 
 [[ -x "${TC}/clang" ]] || { echo "no clang in ${TC}; set THEOS or LR_TC" >&2; exit 1; }
@@ -61,6 +62,11 @@ MBED_TBZ="${DEPS}/src/mbedtls-${MBEDTLS_VERSION}.tar.bz2"
 MBED_SRC="${DEPS}/src/mbedtls-${MBEDTLS_VERSION}"
 fetch "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-${MBEDTLS_VERSION}/mbedtls-${MBEDTLS_VERSION}.tar.bz2" "${MBED_TBZ}"
 unpack "${MBED_TBZ}" "${MBED_SRC}"
+
+SSH2_TGZ="${DEPS}/src/libssh2-${LIBSSH2_VERSION}.tar.gz"
+SSH2_SRC="${DEPS}/src/libssh2-${LIBSSH2_VERSION}"
+fetch "https://github.com/libssh2/libssh2/releases/download/libssh2-${LIBSSH2_VERSION}/libssh2-${LIBSSH2_VERSION}.tar.gz" "${SSH2_TGZ}"
+unpack "${SSH2_TGZ}" "${SSH2_SRC}"
 
 build_openssl_armv7() {
   local prefix="${DEPS}/openssl-armv7"
@@ -148,6 +154,35 @@ build_mbedtls_armv7() {
   touch "${marker}"
 }
 
+# libssh2 for legacyray-ssh, the helper that sets up a user's own server the
+# way the amnezia client does; it rides on the openssl built above
+build_libssh2_armv7() {
+  local prefix="${DEPS}/libssh2-armv7"
+  local marker="${prefix}/.built-${LIBSSH2_VERSION}-ios${MIN}"
+  if [[ -f "${marker}" ]]; then echo "libssh2 armv7 up to date"; return; fi
+  local bld="${DEPS}/build/libssh2-armv7"
+  rm -rf "${bld}" "${prefix}"
+  mkdir -p "${bld}" "${prefix}"
+  wrap_cc "${bld}/cc"
+  echo "==> libssh2 ${LIBSSH2_VERSION} armv7 (iOS ${MIN}+)"
+  (
+    cd "${bld}"
+    "${SSH2_SRC}/configure" --host=arm-apple-darwin11 --prefix="${prefix}" \
+      CC="${bld}/cc" AR="${TC}/llvm-ar" RANLIB="${TC}/ranlib" \
+      CFLAGS="-O2" CPPFLAGS="-I${DEPS}/openssl-armv7/include" \
+      LDFLAGS="-L${DEPS}/openssl-armv7/lib" LIBS="-lcrypto" \
+      --with-crypto=openssl --with-libssl-prefix="${DEPS}/openssl-armv7" \
+      --disable-shared --enable-static --disable-examples-build \
+      --disable-docker-tests --disable-sshd-tests --without-libz >/dev/null
+    make -C src -j"${JOBS}" >/dev/null
+    make -C src install >/dev/null
+    make install-data >/dev/null 2>&1 || true
+    mkdir -p "${prefix}/include"
+    cp "${SSH2_SRC}"/include/*.h "${prefix}/include/"
+  )
+  touch "${marker}"
+}
+
 # the xcode daemon targets link openssl from ./deps inside the project, which
 # is what the os x vm sees over the shared folder
 copy_for_xcode() {
@@ -159,6 +194,7 @@ copy_for_xcode() {
 
 build_openssl_armv7
 build_mbedtls_armv7
+build_libssh2_armv7
 if [[ "${1:-}" == "host" ]]; then build_openssl_host; fi
 copy_for_xcode
 echo "deps ready in ${DEPS} (openssl copied to deps/ for xcode)"

@@ -16,6 +16,7 @@
 #import "LRScreen.h"
 #import "LRAWGProfiles.h"
 #import "LRRoutingProfiles.h"
+#import "LRServersScreen.h"
 #import "LRJSON.h"
 #include "amnezia_bundle.h"
 
@@ -53,6 +54,9 @@
     }];
     [menu addItem:L(@"Import from File") action:^{
         [LRImporter present:[[[LRFilesScreen alloc] init] autorelease]];
+    }];
+    [menu addItem:L(@"Set up my own server") action:^{
+        [LRImporter present:[[[LRServerSetupScreen alloc] init] autorelease]];
     }];
     [menu showFromView:anchor];
 }

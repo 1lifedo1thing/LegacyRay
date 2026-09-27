@@ -34,7 +34,8 @@ AWGD_SRC   = senkoawgd.c awg_utun.c awg_route.c awg_pfroute.c core/awg_config.c 
              core/awg_handshake.c core/awg_tunnel.c core/b64.c core/reality_crypto.c \
              status.c legacy_ios.c proc_detach.c
 
-TOOLS = $(BUILD)/legacyrayd $(BUILD)/legacyrayctl $(BUILD)/legacyray-kick $(BUILD)/legacyrayawgd
+TOOLS = $(BUILD)/legacyrayd $(BUILD)/legacyrayctl $(BUILD)/legacyray-kick $(BUILD)/legacyrayawgd \
+        $(BUILD)/legacyray-ssh
 
 .PHONY: all clean
 all: $(TOOLS)
@@ -55,6 +56,15 @@ $(BUILD)/legacyrayctl: senkoctl.c core/b64.c legacy_compat.h
 $(BUILD)/legacyrayawgd: $(AWGD_SRC) legacy_compat.h
 	@mkdir -p $(BUILD)
 	$(LR_CC) $(CFLAGS) $(AWGD_SRC) -o $@ $(LDFLAGS) $(LIBS)
+	$(LR_STRIP) -x $@
+	$(LR_LDID) -S $@
+
+# legacyray-ssh: the app's ssh client for setting up its user's own server.
+# runs as mobile; libssh2 on the same static openssl
+$(BUILD)/legacyray-ssh: lr_ssh.c core/b64.c legacy_compat.h
+	@mkdir -p $(BUILD)
+	$(LR_CC) $(CFLAGS) -I$(LR_SSH2)/include lr_ssh.c core/b64.c -o $@ $(LDFLAGS) \
+	    $(LR_SSH2)/lib/libssh2.a $(LR_OSSL)/lib/libcrypto.a
 	$(LR_STRIP) -x $@
 	$(LR_LDID) -S $@
 

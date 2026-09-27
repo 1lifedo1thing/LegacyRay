@@ -7,4 +7,5 @@
 #import "LRCompat.h"
 #import "LRLocalization.h"
 #import "LRSkin.h"
+#import "LRPrefs.h"
 #endif

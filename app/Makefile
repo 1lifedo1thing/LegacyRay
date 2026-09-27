@@ -69,14 +69,15 @@ $(foreach s,$(OBJC_SRC),$(eval $(call compile_objc,$(s))))
 $(foreach s,$(C_SRC),$(eval $(call compile_c,$(s))))
 $(foreach s,$(ZBAR_SRC),$(eval $(call compile_zbar,$(s))))
 
-$(BIN): $(ALL_OBJ) $(RESOURCES) Resources/entitlements.plist
-	@mkdir -p $(APP)/flags
+$(BIN): $(ALL_OBJ) $(RESOURCES) Resources/entitlements.plist $(wildcard Resources/server/*.sh)
+	@mkdir -p $(APP)/flags $(APP)/server
 	@echo "  link  $(APP_NAME)"
 	@$(LR_CC) $(ALL_OBJ) -o $@ $(LDFLAGS)
 	@$(LR_STRIP) -x $@
 	@$(LR_LDID) -SResources/entitlements.plist $@
 	@cp $(RESOURCES) $(APP)/
 	@cp Resources/flags/*.png $(APP)/flags/
+	@cp Resources/server/*.sh $(APP)/server/
 	@printf 'APPL????' > $(APP)/PkgInfo
 	@echo "  built $(APP)"
 

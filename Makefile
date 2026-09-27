@@ -58,7 +58,7 @@ package: all
 	mkdir -p $(STAGE)/usr/bin $(STAGE)/usr/lib/legacyraytlsfix/roots $(STAGE)/Applications \
 	         $(STAGE)/usr/share/doc/legacyray
 	cp daemon/build/ios/legacyrayd daemon/build/ios/legacyrayctl daemon/build/ios/legacyray-kick \
-	   daemon/build/ios/legacyrayawgd $(STAGE)/usr/bin/
+	   daemon/build/ios/legacyrayawgd daemon/build/ios/legacyray-ssh $(STAGE)/usr/bin/
 	cp tweaks/tlsfix/build/legacyraytlsfix.dylib tweaks/status/build/legacyraystatus.dylib $(STAGE)/usr/lib/
 	cp tweaks/status/legacyraystatus.plist $(STAGE)/usr/lib/legacyraystatus.plist
 	cp tweaks/tlsfix/substrate-filter.plist tweaks/tlsfix/cacert.pem $(STAGE)/usr/lib/legacyraytlsfix/

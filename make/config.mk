@@ -25,6 +25,7 @@ LR_OTOOL    := $(LR_TC)/otool
 
 LR_OSSL     ?= $(LR_DEPS)/openssl-armv7
 LR_MBED     ?= $(LR_DEPS)/mbedtls-armv7
+LR_SSH2  ?= $(LR_DEPS)/libssh2-armv7
 
 # ios 4 dpkg only understands gzip members
 LR_DEB_COMPRESSION ?= gzip

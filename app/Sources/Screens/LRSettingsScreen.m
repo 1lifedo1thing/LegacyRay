@@ -20,6 +20,8 @@
 #import "LRRoutingProfiles.h"
 #import "LRNetInfo.h"
 #import "LRReminders.h"
+#import "LRSSH.h"
+#import "LRServersScreen.h"
 #import "LRAWGProfiles.h"
 #import "LRRoutingProfilesScreen.h"
 
@@ -299,6 +301,11 @@ static void LRRoutingChanged(void) {
                   ? [NSString stringWithFormat:@"%lu", (unsigned long)[[LRAWGProfiles profiles] count]] : nil
               action:^(LRRow *r, UIView *c) {
             [me openScreen:[[[LRAWGScreen alloc] init] autorelease]];
+        }],
+        [LRRow value:L(@"Own servers") detail:[[LRServerHosts hosts] count]
+                  ? [NSString stringWithFormat:@"%lu", (unsigned long)[[LRServerHosts hosts] count]] : nil
+              action:^(LRRow *r, UIView *c) {
+            [me openScreen:[[[LRServersScreen alloc] init] autorelease]];
         }],
         [LRRow value:L(@"Export backup") detail:nil action:^(LRRow *r, UIView *c) { [me exportBackup]; }],
         [LRRow value:L(@"Restore backup") detail:nil action:^(LRRow *r, UIView *c) {
