@@ -33,6 +33,7 @@ typedef struct {
     char     web_page_url[512];
     uint32_t update_interval_h;
     uint64_t refill_date;
+    char     routing[8192];
 } ctl_fetch_meta_t;
 
 typedef int (*ctl_fetch_fn)(void *ctx, const char *url,

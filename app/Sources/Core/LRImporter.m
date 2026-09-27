@@ -14,6 +14,9 @@
 #import "LRManualInputScreen.h"
 #import "LRUpdateInstallScreen.h"
 #import "LRScreen.h"
+#import "LRAWGProfiles.h"
+#import "LRRoutingProfiles.h"
+#import "LRJSON.h"
 #include "amnezia_bundle.h"
 
 @implementation LRImporter
@@ -135,6 +138,11 @@ static BOOL LRIsSubscriptionURL(NSString *s) {
         [self importAWG:s];
         return;
     }
+    if ([LRRoutingProfiles isHappRoutingLink:s]) {
+        [self importRoutingLink:s];
+        return;
+    }
+    if ([s hasPrefix:@"{"] && [self tryRoutingJSON:s]) return;
     NSData *utf8 = [s dataUsingEncoding:NSUTF8StringEncoding];
     if ([self tryAmneziaBundle:utf8]) return;
     if ([[s lowercaseString] hasPrefix:@"legacyray://"]) {
@@ -263,29 +271,67 @@ static int LRTrailingInt(NSString *reply) {
 }
 
 + (void)importAWG:(NSString *)text {
-    NSString *path = [LRPrefs awgProfilePath];
-    NSString *old = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
-    NSString *config = [text hasSuffix:@"\n"] ? text : [text stringByAppendingString:@"\n"];
-    [[NSFileManager defaultManager] createDirectoryAtPath:[path stringByDeletingLastPathComponent]
-                              withIntermediateDirectories:YES attributes:nil error:NULL];
-    if (![config writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL]) {
-        [self failed:L(@"Could not save the AmneziaWG profile")];
-        return;
-    }
     [LRToast show:L(@"Checking the AmneziaWG profile...")];
-    [[LRDaemonClient shared] validateAWGAtPath:path reply:^(NSString *reply) {
-        NSString *result = LRTrim(reply);
-        if (![result hasPrefix:@"VALID"]) {
-            if (old) [old writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
-            else [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
-            [LRImporter failed:result ? result : L(@"Invalid AmneziaWG profile")];
+    [LRAWGProfiles addConfig:text name:nil done:^(LRAWGProfile *profile, NSString *error) {
+        if (!profile) {
+            [LRImporter failed:error ? error : L(@"Invalid AmneziaWG profile")];
             return;
         }
+        [LRAWGProfiles setActive:profile];
         [LRPrefs setSelectedBackend:LRBackendAmneziaWG];
         LRLog(@"import", @"amneziawg profile saved");
-        [LRToast showSuccess:L(@"AmneziaWG profile saved. Press POWER to connect.")];
+        [LRToast showSuccess:[NSString stringWithFormat:L(@"Profile “%@” saved. Press POWER to connect."),
+                              profile.name]];
         [[LRCatalog shared] reload];
     }];
+}
+
+#pragma mark routing profiles
+
++ (void)offerRoutingProfile:(LRRoutingProfile *)profile activate:(BOOL)activate {
+    [LRRoutingProfiles save:profile];
+    LRLog(@"import", @"routing profile saved (%lu rules)", (unsigned long)[profile.rules count]);
+    NSString *msg = [profile summary];
+    if (profile.skipped)
+        msg = [msg stringByAppendingFormat:@"\n%@", [NSString stringWithFormat:
+               L(@"%lu entries LegacyRay cannot use were left out (regular expressions, IPv6)."),
+               (unsigned long)profile.skipped]];
+    [LRAlert confirmTitle:[NSString stringWithFormat:L(@"Routing profile “%@”"), profile.name]
+                  message:msg button:activate ? L(@"Apply now") : L(@"Apply")
+              destructive:NO action:^{
+        [LRToast show:L(@"Applying the routing profile...")];
+        [LRRoutingProfiles apply:profile progress:^(NSString *line) {
+            [LRToast show:line];
+        } done:^(BOOL ok, NSString *message) {
+            if (message) [LRToast showError:message];
+            else [LRToast showSuccess:L(@"Routing profile applied")];
+        }];
+    }];
+}
+
++ (void)importRoutingLink:(NSString *)link {
+    NSString *error = nil;
+    BOOL activate = NO;
+    LRRoutingProfile *p = [LRRoutingProfiles profileFromHappLink:link activate:&activate error:&error];
+    if (!p) { [self failed:error]; return; }
+    [self offerRoutingProfile:p activate:activate];
+}
+
++ (BOOL)tryRoutingJSON:(NSString *)text {
+    id json = LRJSONParse([text dataUsingEncoding:NSUTF8StringEncoding]);
+    if (![json isKindOfClass:[NSDictionary class]]) return NO;
+    BOOL happ = NO;
+    for (NSString *k in json)
+        if ([k isKindOfClass:[NSString class]] &&
+            ([k caseInsensitiveCompare:@"DirectSites"] == NSOrderedSame ||
+             [k caseInsensitiveCompare:@"ProxySites"] == NSOrderedSame ||
+             [k caseInsensitiveCompare:@"GlobalProxy"] == NSOrderedSame)) happ = YES;
+    if (!happ) return NO;
+    NSString *error = nil;
+    LRRoutingProfile *p = [LRRoutingProfiles profileFromHappJSON:json error:&error];
+    if (!p) { [self failed:error]; return YES; }
+    [self offerRoutingProfile:p activate:NO];
+    return YES;
 }
 
 #pragma mark karing
@@ -416,6 +462,11 @@ static int LRTrailingInt(NSString *reply) {
         }
         if ([host isEqualToString:@"disconnect"]) {
             [[LRTunnel shared] disconnect];
+            return YES;
+        }
+        /* for activator's "open url" and the like: one gesture flips it */
+        if ([host isEqualToString:@"toggle"]) {
+            [[LRTunnel shared] toggle];
             return YES;
         }
         return NO;

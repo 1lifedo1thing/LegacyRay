@@ -771,6 +771,7 @@ static void import_subscription_url(ctl_server_t *s, ctl_client_t *c,
                        meta.total, meta.description, meta.support_url);
     store_set_sub_extra(&s->engine.store, si, meta.update_interval_h,
                         meta.refill_date, meta.web_page_url);
+    store_set_sub_routing(&s->engine.store, si, meta.routing);
     free(blob);
     if (s->persist) s->persist(s->apply_ctx, &s->engine.store);
     snprintf(name, sizeof name, "subscription added, %zu server(s)", added);
@@ -1438,6 +1439,7 @@ static int refresh_subscription(ctl_server_t *s, int si, char *msg, size_t cap) 
                        meta.support_url);
     store_set_sub_extra(&s->engine.store, (size_t)si, meta.update_interval_h,
                         meta.refill_date, meta.web_page_url);
+    store_set_sub_routing(&s->engine.store, (size_t)si, meta.routing);
     if (meta.title[0]) {
         url_t u;
 /* legacyray: with sub_panel_title on, the panel's name wins over a manual
@@ -2062,6 +2064,12 @@ static void dispatch_line(ctl_server_t *s, ctl_client_t *c,
                                    st->subs[section].web_page_url,
                                    ln, sizeof ln, &lnn) == CTL_OK)
                 client_write(c, ln, lnn);
+            if (st->subs[section].routing[0]) {
+                static char rl[8300];
+                int rn = snprintf(rl, sizeof rl, "SUBROUTING %d %s\n", section,
+                                  st->subs[section].routing);
+                if (rn > 0 && (size_t)rn < sizeof rl) client_write(c, rl, (size_t)rn);
+            }
         }
         if (store_section_count(st) > 0) {
             int order[STORE_MAX_SUBS + 1];

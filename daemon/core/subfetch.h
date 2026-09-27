@@ -54,6 +54,7 @@ typedef struct {
     char     web_page_url[512];
     uint32_t update_interval_h;
     uint64_t refill_date;
+    char     routing[8192]; /* happ routing link from the panel, or empty */
 } subfetch_info_t;
 
 subfetch_status_t subfetch_get(const subfetch_cfg_t *cfg, const char *url,

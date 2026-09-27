@@ -313,9 +313,17 @@
 
 + (void)confirmTitle:(NSString *)title message:(NSString *)message button:(NSString *)button
          destructive:(BOOL)destructive action:(void (^)(void))action {
+    [self confirmTitle:title message:message button:button destructive:destructive action:action cancel:nil];
+}
+
++ (void)confirmTitle:(NSString *)title message:(NSString *)message button:(NSString *)button
+         destructive:(BOOL)destructive action:(void (^)(void))action cancel:(void (^)(void))cancel {
     LRAlert *a = [self alertWithTitle:title message:message];
     void (^block)(void) = [[action copy] autorelease];
-    [a addButton:L(@"Cancel") style:LRButtonMetal action:nil];
+    void (^back)(void) = [[cancel copy] autorelease];
+    [a addButton:L(@"Cancel") style:LRButtonMetal action:^(LRAlert *alert) {
+        if (back) back();
+    }];
     [a addButton:button style:destructive ? LRButtonRed : LRButtonGreen action:^(LRAlert *alert) {
         if (block) block();
     }];

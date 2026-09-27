@@ -78,6 +78,10 @@ BOOL LRReplyIsOK(NSString *reply);
 - (void)diagnostics:(void (^)(NSArray *facts))done;
 - (void)firewallConfig:(void (^)(NSString *text, NSString *error))done;
 - (void)flushTarget:(NSString *)what reply:(void (^)(NSString *reply))done;
+/* geosite / geoip data: "GEO site category-ru 1093" style lines and the
+   final OK / ERR text. update downloads, so it can take a minute */
+- (void)geoStatus:(void (^)(NSArray *lines, NSString *summary, BOOL ok))done;
+- (void)geoUpdate:(void (^)(NSArray *lines, NSString *summary, BOOL ok))done;
 - (void)deviceHWID:(void (^)(NSString *hwid))done;
 - (void)resetDeviceHWID:(void (^)(NSString *hwid, NSString *error))done;
 - (void)daemonLogTail:(void (^)(NSString *text))done;

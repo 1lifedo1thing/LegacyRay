@@ -476,6 +476,19 @@ store_status_t store_set_sub_title(store_t *st, size_t sub_index,
     return STORE_OK;
 }
 
+store_status_t store_set_sub_routing(store_t *st, size_t sub_index, const char *routing) {
+    if (!st) return STORE_ERR_ARG;
+    if (sub_index >= STORE_MAX_SUBS || !st->subs[sub_index].used) return STORE_ERR_RANGE;
+    store_sub_t *sub = &st->subs[sub_index];
+    size_t n = routing ? strlen(routing) : 0;
+    if (n >= sizeof sub->routing) n = 0;
+    for (size_t i = 0; i < n; ++i)
+        if ((unsigned char)routing[i] <= 0x20) { n = 0; break; }
+    memcpy(sub->routing, routing ? routing : "", n);
+    sub->routing[n] = '\0';
+    return STORE_OK;
+}
+
 store_status_t store_set_sub_extra(store_t *st, size_t sub_index,
                                    uint32_t update_interval_h,
                                    uint64_t refill_date,
@@ -827,6 +840,12 @@ store_status_t store_serialize(const store_t *st, char *buf, size_t cap, size_t 
                      web[0] ? web : "-");
         if (n < 0 || (size_t)n >= cap - off) return STORE_ERR_FULL;
         off += (size_t)n;
+        if (st->subs[i].routing[0]) {
+            /* printable and space-free by construction, so it goes as is */
+            n = snprintf(buf + off, cap - off, "SUBROUTING %zu %s\n", i, st->subs[i].routing);
+            if (n < 0 || (size_t)n >= cap - off) return STORE_ERR_FULL;
+            off += (size_t)n;
+        }
     }
 
     n = snprintf(buf + off, cap - off, "ORDER");
@@ -1030,6 +1049,20 @@ store_status_t store_deserialize(store_t *st, const char *buf, size_t len) {
                         web[0] = '\0';
                     store_set_sub_extra(st, (size_t)idx, (uint32_t)interval,
                                         refill, web);
+                }
+            }
+        } else if (llen >= 11 && memcmp(p, "SUBROUTING ", 11) == 0) {
+            const char *q = p + 11;
+            const char *sp = memchr(q, ' ', (size_t)(le - q));
+            int idx = -1;
+            if (sp && parse_int(q, sp, &idx) == 0 && idx >= 0 && idx < STORE_MAX_SUBS &&
+                st->subs[idx].used) {
+                char link[sizeof st->subs[0].routing];
+                size_t n = (size_t)(le - sp - 1);
+                if (n < sizeof link) {
+                    memcpy(link, sp + 1, n);
+                    link[n] = '\0';
+                    store_set_sub_routing(st, (size_t)idx, link);
                 }
             }
         } else if (llen >= 7 && memcmp(p, "SUBHDR ", 7) == 0) {

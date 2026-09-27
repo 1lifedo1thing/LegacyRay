@@ -1,4 +1,6 @@
 #import "LRCatalog.h"
+#import "LRReminders.h"
+#import "LRRoutingProfiles.h"
 #import "LRDaemonClient.h"
 #import "LRPrefs.h"
 #import "LRActivityLog.h"
@@ -116,6 +118,8 @@ static const NSUInteger kPingParallel = 4;
         _loaded = YES;
         if (renumbered) [self forgetPings];
         [self restoreSelection];
+        [LRReminders scheduleForSubscriptions:_subscriptions];
+        [LRRoutingProfiles offerProviderRoutingFrom:_subscriptions];
         [self rebuildSections];
         [[NSNotificationCenter defaultCenter] postNotificationName:LRCatalogDidChangeNotification
                                                             object:self];
@@ -331,6 +335,7 @@ static NSString *LRServerIdentity(LRServer *sv) {
             [_pings setObject:[NSNumber numberWithInt:ms >= 0 ? ms : LR_PING_FAILED] forKey:idx];
             [[NSNotificationCenter defaultCenter] postNotificationName:LRCatalogPingNotification
                                                                 object:self];
+            [self checkPick];
             if (![self pinging]) {
                 if ([LRPrefs sortMode] == LRSortPing) {
                     [self rebuildSections];
@@ -341,6 +346,45 @@ static NSString *LRServerIdentity(LRServer *sv) {
             [self pumpPings];
         }];
     }
+}
+
+#pragma mark fastest
+
+- (void)finishPick {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(finishPick) object:nil];
+    if (!_bestDone) return;
+    LRServer *best = nil;
+    int bestMs = 0;
+    for (LRServer *sv in _bestCandidates) {
+        int ms = [[self pingForServer:sv] intValue];
+        if (![self pingForServer:sv] || ms < 0) continue;
+        if (!best || ms < bestMs) { best = sv; bestMs = ms; }
+    }
+    void (^done)(LRServer *, int) = [_bestDone autorelease];
+    _bestDone = nil;
+    [_bestCandidates release];
+    _bestCandidates = nil;
+    done(best, bestMs);
+}
+
+- (void)checkPick {
+    if (!_bestDone) return;
+    for (LRServer *sv in _bestCandidates)
+        if ([[self pingForServer:sv] intValue] == LR_PING_RUNNING) return;
+    [self finishPick];
+}
+
+- (void)pickFastestOf:(NSArray *)servers done:(void (^)(LRServer *best, int ms))done {
+    if (_bestDone || ![servers count]) {
+        if (done) done(nil, 0);
+        return;
+    }
+    _bestCandidates = [servers copy];
+    _bestDone = [done copy];
+    [self pingServers:servers];
+    /* a daemon that stops answering must not leave the pick hanging */
+    [self performSelector:@selector(finishPick) withObject:nil afterDelay:45.0];
+    [self checkPick];
 }
 
 - (void)pingServers:(NSArray *)servers {

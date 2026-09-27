@@ -189,6 +189,16 @@ static http_status_t consume_line(http_parser_t *p) {
             memcpy(p->subscription_support_url, v, n);
             p->subscription_support_url[n] = '\0';
         }
+    } else if (hdr_is(p->line, "routing:")) {
+        /* a profile cut short would not decode, so an oversized one is dropped */
+        const char *v = skip_ws(p->line + 8);
+        size_t n = strlen(v);
+        while (n && (v[n - 1] == ' ' || v[n - 1] == '\t')) --n;
+        if (n > 0 && n < sizeof p->routing) {
+            memcpy(p->routing, v, n);
+            p->routing[n] = '\0';
+            p->have_routing = 1;
+        }
     } else if (hdr_is(p->line, "profile-update-interval:")) {
         const char *v = skip_ws(p->line + 24);
         unsigned long hours = 0;

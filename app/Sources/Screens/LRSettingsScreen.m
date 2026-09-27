@@ -17,6 +17,11 @@
 #import "LRDiagnosticsScreen.h"
 #import "LRAboutScreen.h"
 #import "LRUpdatesScreen.h"
+#import "LRRoutingProfiles.h"
+#import "LRNetInfo.h"
+#import "LRReminders.h"
+#import "LRAWGProfiles.h"
+#import "LRRoutingProfilesScreen.h"
 
 static LRDaemonSettings *DS(void) { return [LRDaemonSettings shared]; }
 
@@ -117,6 +122,90 @@ static void LRRoutingChanged(void) {
         [self daemonToggle:L(@"Bypass local networks") key:@"bypass_lan" fallback:YES routing:YES], nil]
                                        footer:nil]];
 
+    /* anti-censorship and safety */
+    BOOL frag = [DS() boolForKey:@"fragment" fallback:NO];
+    NSString *fragSize = [DS() stringForKey:@"fragment_size"];
+    NSInteger fragDelay = [DS() integerForKey:@"fragment_delay" fallback:10];
+    NSArray *sizeValues = [NSArray arrayWithObjects:@"10-30", @"50-100", @"100-200", @"200-400", nil];
+    NSArray *delayValues = [NSArray arrayWithObjects:@"0", @"5", @"10", @"20", @"50", nil];
+    NSMutableArray *dpi = [NSMutableArray array];
+    [dpi addObject:[self daemonToggle:L(@"Fragment the TLS handshake") key:@"fragment" fallback:NO routing:NO]];
+    if (frag) {
+        [dpi addObject:[LRRow value:L(@"Fragment size") detail:[NSString stringWithFormat:L(@"%@ bytes"), fragSize ? fragSize : @"100-200"]
+                             action:^(LRRow *r, UIView *c) {
+            NSMutableArray *names = [NSMutableArray array];
+            for (NSString *v in sizeValues) [names addObject:[NSString stringWithFormat:L(@"%@ bytes"), v]];
+            NSUInteger sel = fragSize ? [sizeValues indexOfObject:fragSize] : 2;
+            [me choose:L(@"Fragment size") options:names selected:sel == NSNotFound ? -1 : (NSInteger)sel
+                picked:^(NSInteger i) {
+                [DS() setValue:[sizeValues objectAtIndex:(NSUInteger)i] forKey:@"fragment_size" done:nil];
+            }];
+        }]];
+        [dpi addObject:[LRRow value:L(@"Pause between fragments")
+                             detail:[NSString stringWithFormat:L(@"%ld ms"), (long)fragDelay]
+                             action:^(LRRow *r, UIView *c) {
+            NSMutableArray *names = [NSMutableArray array];
+            for (NSString *v in delayValues) [names addObject:[NSString stringWithFormat:L(@"%@ ms"), v]];
+            NSUInteger sel = [delayValues indexOfObject:[NSString stringWithFormat:@"%ld", (long)fragDelay]];
+            [me choose:L(@"Pause between fragments") options:names selected:sel == NSNotFound ? -1 : (NSInteger)sel
+                picked:^(NSInteger i) {
+                [DS() setValue:[delayValues objectAtIndex:(NSUInteger)i] forKey:@"fragment_delay" done:nil];
+            }];
+        }]];
+    }
+    [sections addObject:[LRSectionSpec header:L(@"Getting past blocking") rows:dpi
+                                       footer:L(@"Sends the first packet of every TLS and Reality connection in small pieces, so filters that read the server name out of it see only part of it. Each new connection starts a little slower.")]];
+
+    NSString *dns = [DS() stringForKey:@"dns_upstream"];
+    NSArray *dnsValues = [NSArray arrayWithObjects:@"1.1.1.1", @"8.8.8.8", @"9.9.9.9", @"77.88.8.8", nil];
+    NSArray *dnsNames = [NSArray arrayWithObjects:@"Cloudflare 1.1.1.1", @"Google 8.8.8.8", @"Quad9 9.9.9.9",
+                         L(@"Yandex 77.88.8.8"), L(@"Custom..."), nil];
+    BOOL lan = [DS() boolForKey:@"socks_public" fallback:NO];
+    NSString *ip = [LRNetInfo localIPv4];
+    NSInteger socksPort = [DS() integerForKey:@"socks_port" fallback:1080];
+    NSMutableArray *safety = [NSMutableArray array];
+    [safety addObject:[self daemonToggle:L(@"Kill switch") key:@"kill_switch" fallback:NO routing:YES]];
+    [safety addObject:[LRRow value:L(@"DNS server") detail:dns ? dns : @"8.8.8.8" action:^(LRRow *r, UIView *c) {
+        NSUInteger sel = dns ? [dnsValues indexOfObject:dns] : 1;
+        [me choose:L(@"DNS server") options:dnsNames selected:sel == NSNotFound ? (NSInteger)[dnsValues count] : (NSInteger)sel
+            picked:^(NSInteger i) {
+            if (i < (NSInteger)[dnsValues count]) {
+                [DS() setValue:[dnsValues objectAtIndex:(NSUInteger)i] forKey:@"dns_upstream" done:nil];
+                LRRoutingChanged();
+                return;
+            }
+            [LRAlert promptTitle:L(@"DNS server") message:L(@"An IPv4 address") placeholder:@"1.1.1.1"
+                            text:dns button:L(@"Save") done:^(NSString *v) {
+                [DS() setValue:LRTrim(v) forKey:@"dns_upstream" done:^(BOOL ok, NSString *err) {
+                    if (!ok) [LRToast showError:L(@"That address was not accepted")];
+                    else LRRoutingChanged();
+                }];
+            }];
+        }];
+    }]];
+    [safety addObject:[LRRow toggle:L(@"Share the proxy on the local network") on:lan changed:^(BOOL on) {
+        [DS() setBool:on forKey:@"socks_public"];
+        [LRToast show:L(@"Takes effect after the daemon restarts (or a reboot).")];
+    }]];
+    [sections addObject:[LRSectionSpec header:L(@"Security and network") rows:safety
+                                       footer:lan && ip ? [NSString stringWithFormat:L(@"Other devices on this Wi-Fi can use SOCKS5 %@:%ld. Anyone on the network can, so turn it off on public networks."), ip, (long)socksPort]
+                                                        : L(@"The kill switch keeps UDP other than DNS off the network while a tunnel is up, so nothing leaks around it. Queries go through the tunnel to the DNS server.")]];
+
+    /* battery */
+    NSArray *kaNames = [NSArray arrayWithObjects:L(@"As in the profile"), L(@"Only while the screen is on"), L(@"Off"), nil];
+    [sections addObject:[LRSectionSpec header:L(@"Battery") rows:[NSArray arrayWithObjects:
+        [self daemonToggle:L(@"Economical cipher (ChaCha20)") key:@"prefer_chacha" fallback:YES routing:NO],
+        [LRRow value:L(@"AmneziaWG keepalive") detail:[kaNames objectAtIndex:[LRPrefs awgKeepalive]]
+              action:^(LRRow *r, UIView *c) {
+            LRChoiceScreen *choice = [[[LRChoiceScreen alloc] initWithTitle:L(@"AmneziaWG keepalive") options:kaNames
+                                                                   selected:[LRPrefs awgKeepalive] picked:^(NSInteger i) {
+                [LRPrefs setAWGKeepalive:(LRAWGKeepaliveMode)i];
+            }] autorelease];
+            choice.footer = L(@"Keepalives hold the tunnel open for incoming traffic, but each one wakes the cellular radio. With the screen off, messages that arrive through the tunnel may be delayed until the phone sends something itself. Applies on the next connect.");
+            [me openScreen:choice];
+        }], nil]
+                                       footer:L(@"Old iPhones have no AES instructions; ChaCha20 costs them a fraction of the work, and servers pick it when asked first. The daemon sleeps while idle either way.")]];
+
     /* subscriptions */
     NSInteger hours = [DS() integerForKey:@"sub_refresh_hours" fallback:0];
     NSArray *hourValues = [NSArray arrayWithObjects:@"0", @"6", @"12", @"24", @"48", @"168", nil];
@@ -137,6 +226,11 @@ static void LRRoutingChanged(void) {
         }],
         [LRRow toggle:L(@"Refresh subscriptions on app open") on:[LRPrefs refreshSubscriptionsOnOpen]
               changed:^(BOOL on) { [LRPrefs setRefreshSubscriptionsOnOpen:on]; }],
+        [LRRow toggle:L(@"Remind before a subscription ends") on:[LRReminders enabled]
+              changed:^(BOOL on) {
+            [LRReminders setEnabled:on];
+            if (on) [LRReminders scheduleForSubscriptions:[LRCatalog shared].subscriptions];
+        }],
         [LRRow toggle:L(@"Keep renamed subscriptions after updates") on:![DS() boolForKey:@"sub_panel_title" fallback:NO]
               changed:^(BOOL on) { [DS() setBool:!on forKey:@"sub_panel_title"]; }],
         [LRRow value:@"User-Agent" detail:ua ? ua : @"Happ/3.26.1" action:^(LRRow *r, UIView *c) {
@@ -201,7 +295,9 @@ static void LRRoutingChanged(void) {
 
     /* connections and tools */
     NSArray *tools = [NSArray arrayWithObjects:
-        [LRRow value:@"AmneziaWG" detail:[LRPrefs hasAWGProfile] ? L(@"Saved") : nil action:^(LRRow *r, UIView *c) {
+        [LRRow value:@"AmneziaWG" detail:[LRPrefs hasAWGProfile]
+                  ? [NSString stringWithFormat:@"%lu", (unsigned long)[[LRAWGProfiles profiles] count]] : nil
+              action:^(LRRow *r, UIView *c) {
             [me openScreen:[[[LRAWGScreen alloc] init] autorelease]];
         }],
         [LRRow value:L(@"Export backup") detail:nil action:^(LRRow *r, UIView *c) { [me exportBackup]; }],
@@ -330,6 +426,8 @@ static void LRRoutingChanged(void) {
     if ([type isEqualToString:@"domain"]) return L(@"Exact domain");
     if ([type isEqualToString:@"ip-cidr"]) return @"IP / CIDR";
     if ([type isEqualToString:@"port"]) return L(@"Port or range");
+    if ([type isEqualToString:@"geosite"]) return L(@"geosite category");
+    if ([type isEqualToString:@"geoip"]) return L(@"geoip country");
     return type;
 }
 
@@ -360,6 +458,24 @@ static void LRRoutingChanged(void) {
 - (void)presets:(UIView *)anchor {
     __block LRRoutingScreen *me = self;
     LRMenu *menu = [LRMenu menuWithTitle:L(@"Presets")];
+    [menu addItem:L(@"Russian sites and addresses go direct (geo)") action:^{
+        [me addRules:[NSArray arrayWithObjects:
+            [NSArray arrayWithObjects:@"direct", @"geosite", @"category-ru", nil],
+            [NSArray arrayWithObjects:@"direct", @"geosite", @"private", nil],
+            [NSArray arrayWithObjects:@"direct", @"geoip", @"ru", nil],
+            [NSArray arrayWithObjects:@"direct", @"geoip", @"private", nil],
+            [NSArray arrayWithObjects:@"direct", @"domain-suffix", @"xn--p1ai", nil], nil]];
+        [[LRDaemonClient shared] geoUpdate:^(NSArray *lines, NSString *summary, BOOL ok) {
+            if (!ok) [LRToast showError:summary ? summary : L(@"Geo data could not be downloaded")];
+        }];
+    }];
+    [menu addItem:L(@"Block ads (geosite)") action:^{
+        [me addRules:[NSArray arrayWithObjects:
+            [NSArray arrayWithObjects:@"block", @"geosite", @"category-ads-all", nil], nil]];
+        [[LRDaemonClient shared] geoUpdate:^(NSArray *lines, NSString *summary, BOOL ok) {
+            if (!ok) [LRToast showError:summary ? summary : L(@"Geo data could not be downloaded")];
+        }];
+    }];
     [menu addItem:L(@"Russian sites go direct") action:^{
         NSMutableArray *specs = [NSMutableArray array];
         for (NSString *d in [NSArray arrayWithObjects:@"ru", @"su", @"xn--p1ai", @"yandex.net", @"vk.com",
@@ -409,6 +525,20 @@ static void LRRoutingChanged(void) {
             LRRoutingChanged();
         }], nil]
                                        footer:L(@"When disabled, all supported traffic uses the selected station. Local networks means LAN, link-local and carrier-grade NAT addresses.")]];
+    NSString *activeProfile = [LRRoutingProfiles activeName];
+    [sections addObject:[LRSectionSpec header:nil rows:[NSArray arrayWithObjects:
+        [LRRow value:L(@"Routing profiles") detail:activeProfile ? activeProfile : L(@"None")
+              action:^(LRRow *r, UIView *c) {
+            [me openScreen:[[[LRRoutingProfilesScreen alloc] init] autorelease]];
+        }],
+        [LRRow value:L(@"Split tunneling") detail:direct ? L(@"Only the list") : L(@"All but the list")
+              action:^(LRRow *r, UIView *c) {
+            [me openScreen:[[[LRSitesScreen alloc] init] autorelease]];
+        }],
+        [LRRow value:L(@"Geo data") detail:@"geosite · geoip" action:^(LRRow *r, UIView *c) {
+            [me openScreen:[[[LRGeoScreen alloc] init] autorelease]];
+        }], nil]
+                                       footer:nil]];
     NSMutableArray *rules = [NSMutableArray array];
     for (LRRule *rule in _rules) {
         LRRow *row = [LRRow value:rule.value detail:[LRRoutingScreen actionName:rule.action]
@@ -468,6 +598,8 @@ static void LRRoutingChanged(void) {
 
 - (NSString *)example {
     if ([_type isEqualToString:@"domain-suffix"]) return @"example.com";
+    if ([_type isEqualToString:@"geosite"]) return @"category-ru";
+    if ([_type isEqualToString:@"geoip"]) return @"ru";
     if ([_type isEqualToString:@"domain"]) return @"api.example.com";
     if ([_type isEqualToString:@"domain-keyword"]) return @"example";
     if ([_type isEqualToString:@"ip-cidr"]) return @"203.0.113.0/24";
@@ -490,7 +622,8 @@ static void LRRoutingChanged(void) {
         row.subtitle = [actionNotes objectAtIndex:i];
         [actionRows addObject:row];
     }
-    NSArray *types = [NSArray arrayWithObjects:@"domain-suffix", @"domain", @"domain-keyword", @"ip-cidr", @"port", nil];
+    NSArray *types = [NSArray arrayWithObjects:@"domain-suffix", @"domain", @"domain-keyword", @"ip-cidr",
+                      @"port", @"geosite", @"geoip", nil];
     NSMutableArray *typeRows = [NSMutableArray array];
     for (NSString *t in types) {
         [typeRows addObject:[LRRow check:[LRRoutingScreen typeName:t] on:[_type isEqualToString:t]

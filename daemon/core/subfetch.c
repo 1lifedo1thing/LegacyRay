@@ -161,6 +161,8 @@ static void parser_info(const http_parser_t *hp, subfetch_info_t *info) {
     if (hp->have_web_page_url)
         snprintf(info->web_page_url, sizeof info->web_page_url, "%s",
                  hp->web_page_url);
+    if (hp->have_routing)
+        snprintf(info->routing, sizeof info->routing, "%s", hp->routing);
     if (hp->have_update_interval) info->update_interval_h = hp->update_interval_h;
     if (hp->have_refill_date) info->refill_date = hp->refill_date;
     /* legacyray: remnawave and marzban put their banner in announce; outside

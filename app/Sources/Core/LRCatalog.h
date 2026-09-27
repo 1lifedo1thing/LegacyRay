@@ -47,6 +47,8 @@ extern NSString * const LRCatalogPingNotification;
     NSMutableArray *_pingQueue;
     NSUInteger _pingInFlight;
     NSString *_lastError;
+    NSArray *_bestCandidates;
+    void (^_bestDone)(LRServer *best, int ms);
 }
 @property (nonatomic, readonly) NSArray *servers;
 @property (nonatomic, readonly) NSArray *subscriptions;
@@ -79,6 +81,9 @@ extern NSString * const LRCatalogPingNotification;
 - (void)cancelPings;
 - (BOOL)pinging;
 - (void)forgetPings;
+/* measure the given servers with the current ping type and answer with the
+   fastest that replied (nil when none did). one pick at a time */
+- (void)pickFastestOf:(NSArray *)servers done:(void (^)(LRServer *best, int ms))done;
 
 - (void)setSection:(LRSection *)section collapsed:(BOOL)collapsed;
 - (void)moveSection:(LRSection *)section toPosition:(NSUInteger)position;

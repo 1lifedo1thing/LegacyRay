@@ -28,6 +28,8 @@
 + (void)showTitle:(NSString *)title message:(NSString *)message;
 + (void)confirmTitle:(NSString *)title message:(NSString *)message button:(NSString *)button
          destructive:(BOOL)destructive action:(void (^)(void))action;
++ (void)confirmTitle:(NSString *)title message:(NSString *)message button:(NSString *)button
+         destructive:(BOOL)destructive action:(void (^)(void))action cancel:(void (^)(void))cancel;
 + (void)promptTitle:(NSString *)title message:(NSString *)message placeholder:(NSString *)placeholder
                text:(NSString *)text button:(NSString *)button done:(void (^)(NSString *value))done;
 @end

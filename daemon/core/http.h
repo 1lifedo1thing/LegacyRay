@@ -36,7 +36,10 @@ typedef enum {
     HP_ERROR
 } http_parse_state_t;
 
-#define HTTP_MAX_HEADER   (8 * 1024) /* cap header buffering */
+/* legacyray: 24k, because happ panels can put a whole routing profile in one
+   header, and a subscription must not fail over the size of its headers */
+#define HTTP_MAX_HEADER   (24 * 1024) /* cap header buffering */
+#define HTTP_MAX_ROUTING  8192
 #define HTTP_MAX_LOCATION 1024
 
 typedef struct {
@@ -87,6 +90,9 @@ typedef struct {
     int     have_update_interval;
     uint64_t refill_date;       /* subscription-refill-date, unix seconds */
     int     have_refill_date;
+/* a happ routing profile the panel offers: "routing: happ://routing/..." */
+    char    routing[HTTP_MAX_ROUTING];
+    int     have_routing;
 
     uint8_t *body;
     size_t   body_cap;

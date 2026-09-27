@@ -1,4 +1,5 @@
 #import "LRPrefs.h"
+#import "LRAWGProfiles.h"
 
 NSString * const LRPrefsDidChangeNotification = @"LRPrefsDidChangeNotification";
 
@@ -118,11 +119,38 @@ static BOOL LRBool(NSString *key, BOOL fallback) {
 }
 
 + (NSString *)awgProfilePath {
-    return @"/var/mobile/Library/Preferences/LegacyRay/amneziawg.conf";
+    return [[LRAWGProfiles active] path];
 }
 
 + (BOOL)hasAWGProfile {
-    return [[NSFileManager defaultManager] fileExistsAtPath:[self awgProfilePath]];
+    return [LRAWGProfiles hasProfiles];
+}
+
+#define LR_POWER_CONF @"/var/mobile/Library/Preferences/LegacyRay/power.conf"
+#define LR_TLS_VERBOSE @"/var/mobile/Library/Preferences/LegacyRay/tlsfix-verbose"
+
++ (LRAWGKeepaliveMode)awgKeepalive {
+    NSInteger v = [D() integerForKey:@"LRAWGKeepalive"];
+    return v >= LRAWGKeepaliveConfig && v <= LRAWGKeepaliveOff ? (LRAWGKeepaliveMode)v : LRAWGKeepaliveConfig;
+}
+
++ (void)setAWGKeepalive:(LRAWGKeepaliveMode)mode {
+    [D() setInteger:mode forKey:@"LRAWGKeepalive"];
+    [D() synchronize];
+    NSString *word = mode == LRAWGKeepaliveOff ? @"off" : mode == LRAWGKeepaliveScreen ? @"screen" : @"config";
+    [[NSString stringWithFormat:@"awg_keepalive=%@\n", word] writeToFile:LR_POWER_CONF atomically:YES
+                                                                  encoding:NSUTF8StringEncoding error:NULL];
+    LRChanged();
+}
+
++ (BOOL)tlsHookVerbose {
+    return [[NSFileManager defaultManager] fileExistsAtPath:LR_TLS_VERBOSE];
+}
+
++ (void)setTLSHookVerbose:(BOOL)on {
+    if (on) [@"1\n" writeToFile:LR_TLS_VERBOSE atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    else [[NSFileManager defaultManager] removeItemAtPath:LR_TLS_VERBOSE error:NULL];
+    LRChanged();
 }
 
 + (BOOL)consumeFirstLaunch {

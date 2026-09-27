@@ -53,6 +53,7 @@ HOST_TESTS += test_trojan
 HOST_TESTS += test_shadowsocks
 HOST_TESTS += test_qr_zbar
 HOST_TESTS += test_legacyray
+HOST_TESTS += test_qr_encode
 
 all: test
 
@@ -61,6 +62,7 @@ test: $(HOST_TESTS)
 	./test_trojan
 	./test_shadowsocks
 	./test_qr_zbar
+	./test_qr_encode
 	./test_traffic
 	./test_loop_traffic
 	./test_rules
@@ -210,6 +212,10 @@ test_shadowsocks: test_shadowsocks.c $(CORE)/shadowsocks_client.c $(CORE)/realit
 
 test_qr_zbar: test_qr_zbar.c $(ZBAR_SRC)
 	$(CC) $(ZBAR_CFLAGS) $(CFLAGS) test_qr_zbar.c $(ZBAR_SRC) -o $@
+
+test_qr_encode: test_qr_encode.c ../app/Sources/Core/lr_qr.c $(ZBAR_SRC)
+	$(CC) $(ZBAR_CFLAGS) $(CFLAGS) -I../app/Sources/Core test_qr_encode.c \
+	      ../app/Sources/Core/lr_qr.c $(ZBAR_SRC) -o $@
 
 test_reality_crypto: test_reality_crypto.c $(CORE)/reality_crypto.c $(CORE)/reality_crypto.h
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) test_reality_crypto.c $(CORE)/reality_crypto.c \

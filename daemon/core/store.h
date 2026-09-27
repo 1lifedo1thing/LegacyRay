@@ -32,6 +32,7 @@ typedef struct {
     uint32_t update_interval_h;
     uint64_t refill_date;
     char web_page_url[512];
+    char routing[8192]; /* legacyray: the panel's happ routing link, or empty */
     int  used;
 } store_sub_t;
 
@@ -112,6 +113,8 @@ void store_set_sub_meta(store_t *st, size_t sub_index, uint64_t upload,
 store_status_t store_set_sub_title(store_t *st, size_t sub_index,
                                    const char *title, const char *url_host);
 /* legacyray: update interval (hours), traffic refill date and web page */
+store_status_t store_set_sub_routing(store_t *st, size_t sub_index, const char *routing);
+
 store_status_t store_set_sub_extra(store_t *st, size_t sub_index,
                                    uint32_t update_interval_h,
                                    uint64_t refill_date,

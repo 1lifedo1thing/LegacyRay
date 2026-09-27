@@ -145,6 +145,10 @@ void LRBuildDiagnosticReport(void (^done)(NSString *)) {
                 }];
             }];
         }],
+        [LRRow toggle:L(@"Verbose TLS hook log") on:[LRPrefs tlsHookVerbose] changed:^(BOOL on) {
+            [LRPrefs setTLSHookVerbose:on];
+            if (on) [LRToast show:L(@"Apps started from now on log every redirected connection. Turn it off again when done: it costs battery.")];
+        }],
         [LRRow value:L(@"Crash report") detail:[SenkoCrashLastReport() length] ? L(@"Present") : L(@"None")
               action:^(LRRow *r, UIView *c) {
             NSString *crash = SenkoCrashLastReport();

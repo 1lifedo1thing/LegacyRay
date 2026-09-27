@@ -1,4 +1,5 @@
 #import "LRAppDelegate.h"
+#import "LRAWGProfiles.h"
 #import "LRSkin.h"
 #import "LRDraw.h"
 #import "LRPrefs.h"
@@ -86,6 +87,7 @@ static LRAppDelegate *gShared = nil;
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     gShared = self;
     SenkoCrashStage("launch");
+    [LRAWGProfiles migrate];
     [LRSkin reload];
     _window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
     _window.backgroundColor = [UIColor blackColor];

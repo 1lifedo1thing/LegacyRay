@@ -93,7 +93,8 @@ static NSString *LRFlagCodeInText(NSString *text, NSRange *outRange) {
 @synthesize index = _index, name = _name, url = _url, header = _header, expire = _expire,
             upload = _upload, download = _download, total = _total, summary = _summary,
             supportURL = _supportURL, updateIntervalHours = _updateIntervalHours,
-            refillDate = _refillDate, webPageURL = _webPageURL;
+            refillDate = _refillDate, webPageURL = _webPageURL,
+            routingLink = _routingLink;
 
 - (void)dealloc {
     [_name release];
@@ -102,6 +103,7 @@ static NSString *LRFlagCodeInText(NSString *text, NSRange *outRange) {
     [_summary release];
     [_supportURL release];
     [_webPageURL release];
+    [_routingLink release];
     [super dealloc];
 }
 

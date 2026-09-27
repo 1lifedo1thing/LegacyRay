@@ -1133,6 +1133,7 @@ static int daemon_ctl_fetch_timeout(void *ctx, const char *url,
         snprintf(meta->web_page_url, sizeof meta->web_page_url, "%s", info.web_page_url);
         meta->update_interval_h = info.update_interval_h;
         meta->refill_date = info.refill_date;
+        snprintf(meta->routing, sizeof meta->routing, "%s", info.routing);
     }
     fprintf(stderr, "legacyrayd: subfetch ok %zu bytes\n", len ? *len : 0);
     return 0;

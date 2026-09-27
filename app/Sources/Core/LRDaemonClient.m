@@ -522,6 +522,9 @@ static LRSubscription *LRFindSub(NSArray *subs, int idx) {
                 s.updateIntervalHours = (unsigned int)[[t objectAtIndex:2] intValue];
                 s.refillDate = (unsigned long long)[[t objectAtIndex:3] longLongValue];
                 s.webPageURL = LRPercentField([t objectAtIndex:4]);
+            } else if ([ln hasPrefix:@"SUBROUTING "] && [t count] >= 3) {
+                LRSubscription *s = LRFindSub(subs, [[t objectAtIndex:1] intValue]);
+                s.routingLink = [t objectAtIndex:2];
             } else if ([ln hasPrefix:@"SECTION "]) {
                 for (NSUInteger i = 1; i < [t count]; ++i)
                     [order addObject:[NSNumber numberWithInt:[[t objectAtIndex:i] intValue]]];
@@ -822,6 +825,32 @@ static BOOL LRCheckModeValid(NSString *mode) {
         if (callback) callback(sawEnd ? text : nil,
                                sawEnd ? nil : (error ? error : @"the daemon did not answer"));
     }];
+}
+
+- (void)geo:(NSString *)verb timeout:(int)ms done:(void (^)(NSArray *, NSString *, BOOL))done {
+    void (^callback)(NSArray *, NSString *, BOOL) = [[done copy] autorelease];
+    [self sendCommand:[@"GEO " stringByAppendingString:verb] timeoutMs:ms reply:^(NSString *reply) {
+        NSMutableArray *lines = [NSMutableArray array];
+        NSString *summary = nil;
+        BOOL ok = NO;
+        for (NSString *raw in [reply componentsSeparatedByString:@"\n"]) {
+            NSString *ln = LRTrim(raw);
+            if (!ln) continue;
+            if ([ln hasPrefix:@"GEO "]) [lines addObject:[ln substringFromIndex:4]];
+            else if ([ln hasPrefix:@"OK "]) { ok = YES; summary = [ln substringFromIndex:3]; }
+            else if ([ln hasPrefix:@"ERR "]) summary = [ln substringFromIndex:4];
+        }
+        if (!reply) summary = L(@"The daemon did not answer");
+        if (callback) callback(lines, summary, ok);
+    }];
+}
+
+- (void)geoStatus:(void (^)(NSArray *, NSString *, BOOL))done {
+    [self geo:@"STATUS" timeout:8000 done:done];
+}
+
+- (void)geoUpdate:(void (^)(NSArray *, NSString *, BOOL))done {
+    [self geo:@"UPDATE" timeout:420000 done:done];
 }
 
 - (void)flushTarget:(NSString *)what reply:(void (^)(NSString *))done {

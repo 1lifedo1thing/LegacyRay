@@ -49,6 +49,7 @@
     unsigned int _updateIntervalHours;
     unsigned long long _refillDate;
     NSString *_webPageURL;
+    NSString *_routingLink;
 }
 @property (nonatomic, assign) int index;
 @property (nonatomic, copy) NSString *name;
@@ -64,6 +65,8 @@
 @property (nonatomic, assign) unsigned int updateIntervalHours;
 @property (nonatomic, assign) unsigned long long refillDate;
 @property (nonatomic, copy) NSString *webPageURL;
+/* a happ routing profile the panel offers with the feed, or nil */
+@property (nonatomic, copy) NSString *routingLink;
 
 - (unsigned long long)used;
 /* 0..1, or -1 when the panel sets no limit */

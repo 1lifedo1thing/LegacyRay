@@ -13,6 +13,8 @@
 #import "LRStationScreen.h"
 #import "LRSubscriptionScreen.h"
 #import "LRAWGScreen.h"
+#import "LRAWGProfiles.h"
+#import "LRShareScreen.h"
 
 #define LR_SECTION_AWG (-2)
 
@@ -67,6 +69,7 @@
     [nc addObserver:self selector:@selector(rebuild) name:LRCatalogDidChangeNotification object:nil];
     [nc addObserver:self selector:@selector(pingsChanged) name:LRCatalogPingNotification object:nil];
     [nc addObserver:self selector:@selector(pingsChanged) name:LRTunnelDidChangeNotification object:nil];
+    [nc addObserver:self selector:@selector(rebuild) name:LRAWGProfilesDidChangeNotification object:nil];
     [self rebuild];
     if (![LRCatalog shared].loaded) [[LRCatalog shared] reload];
 }
@@ -83,11 +86,14 @@
 - (void)rebuild {
     LRCatalog *catalog = [LRCatalog shared];
     NSMutableArray *rows = [NSMutableArray array];
-    if ([LRPrefs hasAWGProfile]) {
+    NSArray *profiles = [LRAWGProfiles profiles];
+    if ([profiles count] && !_arranging) {
         NSNumber *sid = [NSNumber numberWithInt:LR_SECTION_AWG];
         [rows addObject:[NSDictionary dictionaryWithObjectsAndKeys:@"plate", @"kind", sid, @"sid", nil]];
         if (![LRPrefs sectionCollapsed:@"awg"])
-            [rows addObject:[NSDictionary dictionaryWithObjectsAndKeys:@"awg", @"kind", sid, @"sid", nil]];
+            for (LRAWGProfile *p in profiles)
+                [rows addObject:[NSDictionary dictionaryWithObjectsAndKeys:@"awg", @"kind", sid, @"sid",
+                                 p, @"profile", nil]];
     }
     for (LRSection *sec in catalog.sections) {
         [rows addObject:[NSDictionary dictionaryWithObjectsAndKeys:@"plate", @"kind", sec, @"section", nil]];
@@ -237,7 +243,10 @@
     if ([kind isEqualToString:@"plate"]) {
         LRSection *sec = [row objectForKey:@"section"];
         if (!sec) {
-            [(LRPlateHeaderCell *)cell showTitle:@"AmneziaWG" country:nil meta:L(@"profile")
+            NSUInteger n = [[LRAWGProfiles profiles] count];
+            NSString *meta = [NSString stringWithFormat:@"%lu %@", (unsigned long)n,
+                              LRPlural((NSInteger)n, L(@"profile"), L(@"profiles (few)"), L(@"profiles"))];
+            [(LRPlateHeaderCell *)cell showTitle:@"AmneziaWG" country:nil meta:meta
                                        collapsed:[LRPrefs sectionCollapsed:@"awg"] margin:margin];
             return;
         }
@@ -246,9 +255,11 @@
         return;
     }
     if ([kind isEqualToString:@"awg"]) {
-        BOOL sel = [LRPrefs selectedBackend] == LRBackendAmneziaWG;
-        BOOL live = tunnel.activeBackend == LRBackendAmneziaWG && tunnel.state == LRTunnelConnected;
-        [(LRStationCell *)cell showTitle:L(@"WireGuard profile") detail:@"AmneziaWG · UDP" selected:sel
+        LRAWGProfile *p = [row objectForKey:@"profile"];
+        BOOL isActive = [p.path isEqualToString:[[LRAWGProfiles active] path]];
+        BOOL sel = isActive && [LRPrefs selectedBackend] == LRBackendAmneziaWG;
+        BOOL live = sel && tunnel.activeBackend == LRBackendAmneziaWG && tunnel.state == LRTunnelConnected;
+        [(LRStationCell *)cell showTitle:p.name detail:[p summary] selected:sel
                                     live:live margin:margin last:last];
         return;
     }
@@ -289,7 +300,7 @@
         return;
     }
     if ([kind isEqualToString:@"awg"]) {
-        [self tuneToAWG];
+        [self tuneToAWG:[row objectForKey:@"profile"]];
         return;
     }
     [self tuneTo:[row objectForKey:@"server"]];
@@ -416,15 +427,34 @@
                                                               [[LRCatalog shared] displayNameForServer:sv]]];
 }
 
-- (void)tuneToAWG {
+- (void)tuneToAWG:(LRAWGProfile *)profile {
     LRTunnel *t = [LRTunnel shared];
+    BOOL other = profile && ![profile.path isEqualToString:[[LRAWGProfiles active] path]];
+    if (profile) [LRAWGProfiles setActive:profile];
     [LRPrefs setSelectedBackend:LRBackendAmneziaWG];
-    if ([t isOn] && t.activeBackend == LRBackendServer) {
+    if ([t isOn] && (t.activeBackend == LRBackendServer || other)) {
         [t disconnect];
         [t performSelector:@selector(startAWG) withObject:nil afterDelay:1.5];
     }
     [[NSNotificationCenter defaultCenter] postNotificationName:LRTunnelDidChangeNotification object:t];
     [self pingsChanged];
+}
+
+#pragma mark fastest
+
+- (void)connectFastestOf:(NSArray *)servers {
+    [LRToast show:[NSString stringWithFormat:L(@"Measuring %lu stations..."), (unsigned long)[servers count]]];
+    [[LRCatalog shared] pickFastestOf:servers done:^(LRServer *best, int ms) {
+        if (!best) {
+            [LRToast showError:L(@"No station answered")];
+            return;
+        }
+        LRLog(@"stations", @"fastest station picked (%d ms)", ms);
+        [LRToast showSuccess:[NSString stringWithFormat:L(@"%@ · %d ms"),
+                              [[LRCatalog shared] displayNameForServer:best], ms]];
+        [LRPrefs setSelectedBackend:LRBackendServer];
+        [[LRTunnel shared] connectServerIndex:best.index];
+    }];
 }
 
 #pragma mark menus
@@ -433,6 +463,8 @@
     LRCatalog *catalog = [LRCatalog shared];
     __block LRStationsScreen *me = self;
     LRMenu *menu = [LRMenu menuWithTitle:nil];
+    if ([catalog.servers count])
+        [menu addItem:L(@"Connect to the fastest") action:^{ [me connectFastestOf:[LRCatalog shared].servers]; }];
     if ([catalog pinging]) [menu addItem:L(@"Stop latency checks") action:^{ [[LRCatalog shared] cancelPings]; }];
     else [menu addItem:L(@"Check latency of all") action:^{ [[LRCatalog shared] pingAll]; }];
     if ([catalog.subscriptions count])
@@ -454,7 +486,7 @@
         for (LRSection *sec in [LRCatalog shared].sections) [[LRCatalog shared] setSection:sec collapsed:anyOpen];
         [me rebuild];
     }];
-    [menu addItem:L(@"AmneziaWG profile") action:^{ [me presentSheet:[[[LRAWGScreen alloc] init] autorelease]]; }];
+    [menu addItem:L(@"AmneziaWG profiles") action:^{ [me presentSheet:[[[LRAWGScreen alloc] init] autorelease]]; }];
     [menu showFromView:anchor];
 }
 
@@ -472,7 +504,8 @@
     } else if ([kind isEqualToString:@"server"]) {
         [self showStationMenu:[row objectForKey:@"server"] from:cell];
     } else {
-        [self presentSheet:[[[LRAWGScreen alloc] init] autorelease]];
+        LRAWGProfile *p = [row objectForKey:@"profile"];
+        [self presentSheet:[[[LRAWGProfileScreen alloc] initWithProfile:p] autorelease]];
     }
 }
 
@@ -499,6 +532,14 @@
     }];
     [menu addItem:L(@"Check latency") action:^{ [[LRCatalog shared] pingServers:[NSArray arrayWithObject:sv]]; }];
     [menu addItem:L(@"Details") action:^{ [me openServerDetail:sv]; }];
+    [menu addItem:L(@"Share") action:^{
+        [[LRDaemonClient shared] serverLinkIndex:sv.index reply:^(NSString *link) {
+            if (!link) { [LRToast showError:L(@"The link could not be read")]; return; }
+            LRShareScreen *share = [[[LRShareScreen alloc] initWithTitle:name payload:link] autorelease];
+            share.subtitle = [sv protocolSummary];
+            [me presentSheet:share];
+        }];
+    }];
     [menu addItem:L(@"Copy link") action:^{
         [[LRDaemonClient shared] serverLinkIndex:sv.index reply:^(NSString *link) {
             if (!link) { [LRToast showError:L(@"The link could not be read")]; return; }
@@ -535,8 +576,10 @@
             }];
         }];
     }
-    if ([sec.servers count])
+    if ([sec.servers count]) {
+        [menu addItem:L(@"Connect to the fastest") action:^{ [me connectFastestOf:sec.servers]; }];
         [menu addItem:L(@"Check latency of this list") action:^{ [[LRCatalog shared] pingServers:sec.servers]; }];
+    }
     NSUInteger at = [[LRCatalog shared].sections indexOfObjectIdenticalTo:sec];
     if (at != NSNotFound && at > 0)
         [menu addItem:L(@"Move up") action:^{ [[LRCatalog shared] moveSection:sec toPosition:at - 1]; }];

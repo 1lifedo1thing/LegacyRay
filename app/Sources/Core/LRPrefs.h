@@ -28,6 +28,14 @@ typedef enum {
     LRBackendAmneziaWG
 } LRBackend;
 
+/* when amneziawg sends its persistent keepalives. every one wakes the
+   cellular radio, which stays in its high power state for seconds after */
+typedef enum {
+    LRAWGKeepaliveConfig = 0,  /* what the profile says */
+    LRAWGKeepaliveScreen,      /* only while the screen is on */
+    LRAWGKeepaliveOff
+} LRAWGKeepaliveMode;
+
 extern NSString * const LRPrefsDidChangeNotification;
 
 @interface LRPrefs : NSObject
@@ -74,9 +82,18 @@ extern NSString * const LRPrefsDidChangeNotification;
 
 + (LRBackend)selectedBackend;
 + (void)setSelectedBackend:(LRBackend)backend;
-/* where the amneziawg profile lives; the helper reads it from there */
+/* the active amneziawg profile's file (LRAWGProfiles), nil without one */
 + (NSString *)awgProfilePath;
 + (BOOL)hasAWGProfile;
+
++ (LRAWGKeepaliveMode)awgKeepalive;
+/* also writes the one-line file the helper reads when a profile starts */
++ (void)setAWGKeepalive:(LRAWGKeepaliveMode)mode;
+
+/* the tls hook writes a line per redirected connection only while this is
+   on; it is a file the hook checks, off unless diagnostics asked for it */
++ (BOOL)tlsHookVerbose;
++ (void)setTLSHookVerbose:(BOOL)on;
 
 /* a yes the first time, for the welcome card */
 + (BOOL)consumeFirstLaunch;

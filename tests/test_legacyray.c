@@ -212,6 +212,18 @@ static void test_store_extra(void) {
        back.subs[sub].update_interval_h == 12 &&
        back.subs[sub].refill_date == 1767225600ULL &&
        strcmp(back.subs[sub].web_page_url, "https://panel.example/me?a=1 b") == 0);
+    const char *link = "happ://routing/onadd/eyJOYW1lIjoiUlUifQ==";
+    ok("routing stored", store_set_sub_routing(&st, sub, link) == STORE_OK &&
+                         strcmp(st.subs[sub].routing, link) == 0);
+    ok("routing refuses spaces", store_set_sub_routing(&st, sub, "a b") == STORE_OK &&
+                                 st.subs[sub].routing[0] == '\0');
+    store_set_sub_routing(&st, sub, link);
+    ok("routing serializes", store_serialize(&st, buf, sizeof buf, &len) == STORE_OK);
+    buf[len] = '\0';
+    ok("routing line written", strstr(buf, "SUBROUTING ") != NULL);
+    store_init(&back);
+    ok("routing reloads", store_deserialize(&back, buf, len) == STORE_OK &&
+                          strcmp(back.subs[sub].routing, link) == 0);
 }
 
 /* the first two suites after the grease slot, read out of a built hello */
