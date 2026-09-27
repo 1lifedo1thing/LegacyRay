@@ -65,6 +65,9 @@ int daemon_ctl_maintain(daemon_ctl_t *d);
 
 /* how soon daemon_ctl_maintain needs to run again, -1 when never on its own */
 int daemon_ctl_timeout_ms(const daemon_ctl_t *d);
+
+/* GEO UPDATE / GEO STATUS: status lines and a final OK or ERR line */
+int daemon_ctl_geo(void *ctx, const char *what, char *out, size_t cap, size_t *len);
 int daemon_ctl_stats(void *ctx, uint64_t *up, uint64_t *down);
 
 int daemon_ctl_apply(void *ctx, const ctl_action_t *action);

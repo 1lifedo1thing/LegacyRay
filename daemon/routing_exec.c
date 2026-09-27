@@ -5,6 +5,7 @@
 #include "core/dns_cache.h"
 #include "core/dns_msg.h"
 #include "pf_table.h"
+#include "core/geo.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -374,6 +375,37 @@ done:
     return rc;
 }
 
+
+/* geoip rules become firewall table entries: direct countries join the bypass
+   table, blocked ones the block table. the address lists are the files the
+   geo module extracted; a missing file only means that rule has no data yet */
+static void pf_geo_tables(const routing_exec_t *st) {
+    if (!st || !st->rules || st->mode != ROUTING_MODE_PF || !st->pf_table_ready) return;
+    const char *pfctl = routing_find_pfctl();
+    if (!pfctl) return;
+    for (size_t i = 0; i < st->rules->count; ++i) {
+        const rule_t *r = &st->rules->entries[i];
+        if (r->type != RULE_TYPE_GEOIP || r->action == RULE_ACTION_PROXY) continue;
+        char path[512];
+        if (geo_file_path(path, sizeof path, LR_GEO_DIR, 'i', r->value) != 0 ||
+            access(path, R_OK) != 0) {
+            fprintf(stderr, "legacyrayd: geoip %s has no address list yet\n", r->value);
+            continue;
+        }
+        const char *table = r->action == RULE_ACTION_BLOCK ? "legacyray_block" : "legacyray_bypass";
+#if defined(SENKO_ROOTLESS)
+        char *argv[] = { (char *)pfctl, (char *)"-q", (char *)"-a", (char *)PF_ANCHOR,
+                         (char *)"-t", (char *)table, (char *)"-T", (char *)"add",
+                         (char *)"-f", path, NULL };
+#else
+        char *argv[] = { (char *)pfctl, (char *)"-q", (char *)"-t", (char *)table,
+                         (char *)"-T", (char *)"add", (char *)"-f", path, NULL };
+#endif
+        int rc = routing_spawn(pfctl, argv);
+        fprintf(stderr, "legacyrayd: geoip %s %s %s\n", r->value,
+                rc == 0 ? "loaded into" : "could not be loaded into", table);
+    }
+}
 
 int routing_pick_free_port(int start, int end) {
     if (start <= 0) {
@@ -1126,6 +1158,7 @@ rexec_status_t routing_exec_up(routing_exec_t *st, int socks_port,
                         routing_exec_down(st);
                         return REXEC_ERR_SPAWN;
                     }
+                    pf_geo_tables(st);
                     return REXEC_OK;
                 }
             }

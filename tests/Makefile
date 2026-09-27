@@ -181,9 +181,9 @@ test_b64: test_b64.c $(CORE)/b64.c $(CORE)/b64.h
 sub_audit: sub_audit.c $(CFG_SRC) $(CORE)/config.h $(CORE)/b64.h
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) sub_audit.c $(CFG_SRC) -o $@ $(TLS_LDFLAGS)
 
-test_transport_ws: test_transport_ws.c $(CORE)/transport_ws.c $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/tls_clienthello.c $(CORE)/transport.h
+test_transport_ws: test_transport_ws.c $(CORE)/transport_ws.c $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/frag.c $(CORE)/tls_clienthello.c $(CORE)/transport.h
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) test_transport_ws.c $(CORE)/transport_ws.c \
-	      $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/tls_clienthello.c -o $@ $(TLS_LDFLAGS)
+	      $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/frag.c $(CORE)/tls_clienthello.c -o $@ $(TLS_LDFLAGS)
 
 test_store_contract: test_store_contract.c $(CORE)/store.c $(CFG_SRC) $(CORE)/store.h
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) test_store_contract.c $(CORE)/store.c $(CFG_SRC) -o $@ $(TLS_LDFLAGS)
@@ -235,7 +235,7 @@ test_vision: test_vision.c $(CORE)/vision.c $(CORE)/vision.h
 	$(CC) $(CFLAGS) test_vision.c $(CORE)/vision.c -o $@
 
 test_transport_grpc: test_transport_grpc.c $(CORE)/transport_pick.c $(CFG_SRC) \
-                     $(CORE)/transport_tcp.c $(CORE)/transport_tls.c \
+                     $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/frag.c \
                      $(CORE)/transport_ws.c $(CORE)/transport_xhttp.c $(CORE)/hpack.c $(CORE)/reality_handshake.c \
                      $(CORE)/reality_crypto.c $(CORE)/reality_auth.c \
                      $(CORE)/tls_clienthello.c $(CORE)/tls13_kdf.c \
@@ -243,7 +243,7 @@ test_transport_grpc: test_transport_grpc.c $(CORE)/transport_pick.c $(CFG_SRC) \
                      $(CORE)/tls13_transcript.c $(CORE)/tls13_handshake.c $(TRACE) $(REPLAY) $(UPLOAD) $(CORE)/grpc_core.c
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) test_transport_grpc.c $(CORE)/transport_pick.c \
 	      $(CFG_SRC) \
-	      $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/transport_ws.c \
+	      $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/frag.c $(CORE)/transport_ws.c \
 	      $(CORE)/transport_xhttp.c $(CORE)/hpack.c \
 	      $(CORE)/reality_handshake.c $(CORE)/reality_crypto.c $(CORE)/reality_auth.c \
 	      $(CORE)/tls_clienthello.c $(CORE)/tls13_kdf.c $(CORE)/tls13_keysched.c \
@@ -251,7 +251,7 @@ test_transport_grpc: test_transport_grpc.c $(CORE)/transport_pick.c $(CFG_SRC) \
 	      $(TRACE) $(REPLAY) $(UPLOAD) $(CORE)/grpc_core.c $(TLS_LDFLAGS) -o $@
 
 test_transport_pick: test_transport_pick.c $(CORE)/transport_pick.c $(CFG_SRC) \
-                     $(CORE)/transport_tcp.c $(CORE)/transport_tls.c \
+                     $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/frag.c \
                      $(CORE)/transport_ws.c $(CORE)/transport_xhttp.c $(CORE)/hpack.c $(CORE)/reality_handshake.c \
                      $(CORE)/reality_crypto.c $(CORE)/reality_auth.c \
                      $(CORE)/tls_clienthello.c $(CORE)/tls13_kdf.c \
@@ -259,7 +259,7 @@ test_transport_pick: test_transport_pick.c $(CORE)/transport_pick.c $(CFG_SRC) \
                       $(CORE)/tls13_transcript.c $(CORE)/tls13_handshake.c $(TRACE) $(REPLAY) $(UPLOAD) $(CORE)/grpc_core.c
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) test_transport_pick.c $(CORE)/transport_pick.c \
 	      $(CFG_SRC) \
-	      $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/transport_ws.c \
+	      $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/frag.c $(CORE)/transport_ws.c \
 	      $(CORE)/transport_xhttp.c $(CORE)/hpack.c \
 	      $(CORE)/reality_handshake.c $(CORE)/reality_crypto.c $(CORE)/reality_auth.c \
 	      $(CORE)/tls_clienthello.c $(CORE)/tls13_kdf.c $(CORE)/tls13_keysched.c \
@@ -267,16 +267,17 @@ test_transport_pick: test_transport_pick.c $(CORE)/transport_pick.c $(CFG_SRC) \
       $(TRACE) $(REPLAY) $(UPLOAD) $(CORE)/grpc_core.c -o $@ $(TLS_LDFLAGS)
 
 test_legacyray: test_legacyray.c $(CORE)/rules.c $(CORE)/store.c $(DAEMON)/routing.c \
-                $(DAEMON)/settings.c $(CORE)/tls_clienthello.c $(CFG_SRC)
+                $(DAEMON)/settings.c $(CORE)/tls_clienthello.c $(CORE)/geo.c $(CORE)/frag.c \
+                $(CORE)/control.c $(CFG_SRC)
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) -I$(DAEMON) test_legacyray.c $(CORE)/store.c \
 	      $(DAEMON)/routing.c $(DAEMON)/settings.c $(CORE)/tls_clienthello.c \
-	      $(CFG_SRC) -o $@ $(TLS_LDFLAGS)
+	      $(CORE)/geo.c $(CORE)/frag.c $(CORE)/control.c $(CFG_SRC) -o $@ $(TLS_LDFLAGS) -lpthread
 
-test_routing_exec: test_routing_exec.c $(DAEMON)/routing_exec.c $(DAEMON)/routing.c \
+test_routing_exec: test_routing_exec.c $(DAEMON)/routing_exec.c $(CORE)/geo.c $(DAEMON)/routing.c \
                    $(DAEMON)/legacy_ios.c $(DAEMON)/routing_exec.h $(DAEMON)/routing.h \
                    $(CORE)/rules.c $(CORE)/rules.h $(CORE)/dns_msg.c \
                    $(CORE)/dns_cache.c $(DAEMON)/pf_table.c
-	$(CC) $(CFLAGS) -I$(DAEMON) test_routing_exec.c $(DAEMON)/routing_exec.c \
+	$(CC) $(CFLAGS) -I$(DAEMON) test_routing_exec.c $(DAEMON)/routing_exec.c $(CORE)/geo.c \
 	      $(DAEMON)/routing.c $(DAEMON)/legacy_ios.c $(NET_SAFE) $(CORE)/rules.c \
 	      $(CORE)/dns_msg.c $(CORE)/dns_cache.c $(DAEMON)/pf_table.c -o $@
 
@@ -292,24 +293,24 @@ test_app_proxy: test_app_proxy.c ../tweaks/tlsfix/stl_proxy.c ../tweaks/tlsfix/s
 
 test_ctl_server: test_ctl_server.c $(DAEMON)/ctl_server.c $(CORE)/ctl_engine.c \
                  $(CORE)/control.c $(CORE)/store.c $(CORE)/url.c $(NET_SAFE) \
-                 $(DAEMON)/settings.c $(DAEMON)/routing_exec.c $(DAEMON)/routing.c \
+                 $(DAEMON)/settings.c $(DAEMON)/routing_exec.c $(CORE)/geo.c $(DAEMON)/routing.c \
                  $(DAEMON)/legacy_ios.c $(CFG_SRC) $(CORE)/dns_msg.c \
                  $(CORE)/dns_cache.c $(DAEMON)/pf_table.c
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) -I$(DAEMON) test_ctl_server.c $(DAEMON)/ctl_server.c \
 	      $(CORE)/ctl_engine.c $(CORE)/control.c $(CORE)/store.c $(CORE)/url.c \
-	      $(DAEMON)/settings.c $(DAEMON)/routing_exec.c $(DAEMON)/routing.c \
+	      $(DAEMON)/settings.c $(DAEMON)/routing_exec.c $(CORE)/geo.c $(DAEMON)/routing.c \
 	      $(DAEMON)/legacy_ios.c \
 	      $(NET_SAFE) $(CFG_SRC) $(CORE)/dns_msg.c $(CORE)/dns_cache.c \
 	      $(DAEMON)/pf_table.c -o $@ $(TLS_LDFLAGS)
 
 test_autoconnect: test_autoconnect.c $(DAEMON)/ctl_server.c $(CORE)/ctl_engine.c \
                  $(CORE)/control.c $(CORE)/store.c $(CORE)/url.c $(NET_SAFE) \
-                 $(DAEMON)/settings.c $(DAEMON)/routing_exec.c $(DAEMON)/routing.c \
+                 $(DAEMON)/settings.c $(DAEMON)/routing_exec.c $(CORE)/geo.c $(DAEMON)/routing.c \
                  $(DAEMON)/legacy_ios.c $(CFG_SRC) $(CORE)/dns_msg.c \
                  $(CORE)/dns_cache.c $(DAEMON)/pf_table.c
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) -I$(DAEMON) test_autoconnect.c $(DAEMON)/ctl_server.c \
 	      $(CORE)/ctl_engine.c $(CORE)/control.c $(CORE)/store.c $(CORE)/url.c \
-	      $(DAEMON)/settings.c $(DAEMON)/routing_exec.c $(DAEMON)/routing.c \
+	      $(DAEMON)/settings.c $(DAEMON)/routing_exec.c $(CORE)/geo.c $(DAEMON)/routing.c \
 	      $(DAEMON)/legacy_ios.c \
 	      $(NET_SAFE) $(CFG_SRC) $(CORE)/dns_msg.c $(CORE)/dns_cache.c \
 	      $(DAEMON)/pf_table.c -o $@ $(TLS_LDFLAGS)
@@ -350,9 +351,9 @@ fuzz_wire: fuzz_wire.c $(CORE)/socks5.c $(CORE)/vless.c $(CORE)/url.c $(NET_SAFE
 	/usr/bin/clang $(FUZZ_FLAGS) fuzz_wire.c $(CORE)/socks5.c $(CORE)/vless.c \
 	      $(CORE)/url.c $(NET_SAFE) -o $@
 
-fuzz_ws: fuzz_ws.c $(CORE)/transport_ws.c $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/tls_clienthello.c
+fuzz_ws: fuzz_ws.c $(CORE)/transport_ws.c $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/frag.c $(CORE)/tls_clienthello.c
 	/usr/bin/clang $(FUZZ_FLAGS) fuzz_ws.c $(CORE)/transport_ws.c \
-	      $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/tls_clienthello.c -o $@ -lssl -lcrypto
+	      $(CORE)/transport_tcp.c $(CORE)/transport_tls.c $(CORE)/frag.c $(CORE)/tls_clienthello.c -o $@ -lssl -lcrypto
 
 fuzz_vision: fuzz_vision.c $(CORE)/vision.c
 	/usr/bin/clang $(FUZZ_FLAGS) fuzz_vision.c $(CORE)/vision.c -o $@

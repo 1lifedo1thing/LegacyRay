@@ -197,11 +197,11 @@ static int LRWriteAll(int fd, const void *buf, size_t len) {
     return total >= 2 && memcmp(buf, "OK", 2) == 0;
 }
 
-- (NSString *)blockingSend:(NSString *)cmd timeoutMs:(int)timeoutMs {
+- (int)openControlSocket {
     const char *path = [_socketPath fileSystemRepresentation];
-    if (!path) return nil;
+    if (!path) return -1;
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) return nil;
+    if (fd < 0) return -1;
     int on = 1;
     setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof on);
     struct sockaddr_un addr;
@@ -210,8 +210,14 @@ static int LRWriteAll(int fd, const void *buf, size_t len) {
     strncpy(addr.sun_path, path, sizeof addr.sun_path - 1);
     if (connect(fd, (struct sockaddr *)&addr, sizeof addr) != 0 || ![self authenticate:fd]) {
         close(fd);
-        return nil;
+        return -1;
     }
+    return fd;
+}
+
+- (NSString *)blockingSend:(NSString *)cmd timeoutMs:(int)timeoutMs {
+    int fd = [self openControlSocket];
+    if (fd < 0) return nil;
     NSString *line = [cmd hasSuffix:@"\n"] ? cmd : [cmd stringByAppendingString:@"\n"];
     NSData *out = [line dataUsingEncoding:NSUTF8StringEncoding];
     if (LRWriteAll(fd, [out bytes], [out length]) != 0) {

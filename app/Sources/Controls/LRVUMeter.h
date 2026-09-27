@@ -9,10 +9,11 @@
     CALayer *_needle;
     CALayer *_needleShadow;
     UIImageView *_glass;
-    double _value;
+    double _value;           /* where the last swing ends */
     double _target;
-    double _velocity;
-    id _link;
+    double *_path;           /* the swing in flight: value, velocity per frame */
+    NSUInteger _pathLen;
+    CFTimeInterval _pathStart;
 }
 @property (nonatomic, copy) NSString *caption;
 - (void)setValue:(double)value animated:(BOOL)animated;

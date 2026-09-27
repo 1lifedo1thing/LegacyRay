@@ -25,6 +25,10 @@ BOOL LRReplyIsOK(NSString *reply);
 
 - (id)initWithSocketPath:(NSString *)path;
 
+/* a connected, authenticated control socket for a conversation that stays
+   open (the WATCH stream), or -1. it blocks, so call it off the main thread */
+- (int)openControlSocket;
+
 - (void)sendCommand:(NSString *)cmd reply:(void (^)(NSString *reply))done;
 - (void)sendCommand:(NSString *)cmd timeoutMs:(int)timeoutMs
               reply:(void (^)(NSString *reply))done;

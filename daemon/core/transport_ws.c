@@ -532,7 +532,8 @@ const transport_vt_t transport_ws_tcp = {
     ws_write,
     NULL,
     ws_close,
-    ws_want_write
+    ws_want_write,
+    NULL
 };
 
 const transport_vt_t transport_ws_reality = {
@@ -541,7 +542,8 @@ const transport_vt_t transport_ws_reality = {
     ws_write,
     NULL,
     ws_close,
-    ws_want_write
+    ws_want_write,
+    NULL
 };
 
 const transport_vt_t transport_ws_tls = {
@@ -550,5 +552,6 @@ const transport_vt_t transport_ws_tls = {
     ws_write,
     NULL,
     ws_close,
-    ws_want_write
+    ws_want_write,
+    NULL
 };

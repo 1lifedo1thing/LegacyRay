@@ -20,6 +20,14 @@ extern "C" {
 /* the longest key and value the control protocol carries in one SET */
 #define SETTINGS_KEY_MAX   32
 #define SETTINGS_VALUE_MAX 64
+/* legacyray: urls are the one kind of value that needs more room */
+#define SETTINGS_URL_MAX 256
+
+#define LR_DEFAULT_GEOSITE_URL \
+    "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
+/* %s is the lower case country code */
+#define LR_DEFAULT_GEOIP_URL \
+    "https://raw.githubusercontent.com/ipverse/rir-ip/master/country/%s/ipv4-aggregated.txt"
 
 /* which rung of the backend ladder the developer screen pinned. the ladder
    picks on its own at AUTO, which is what every normal install runs */
@@ -70,6 +78,13 @@ typedef struct {
     int      prefer_chacha;   /* ask servers for chacha20, cheap on armv7 */
     char     xray_version[16];   /* claimed in the reality session id */
     char     sub_user_agent[SETTINGS_VALUE_MAX]; /* default subscription UA */
+    int      kill_switch;     /* udp that is not dns stays off the wire while up */
+    int      fragment;        /* send the tls hello in small tcp segments */
+    int      fragment_min;    /* bytes per segment, inclusive range */
+    int      fragment_max;
+    int      fragment_delay;  /* milliseconds between segments */
+    char     geosite_url[SETTINGS_URL_MAX]; /* a v2fly geosite .dat */
+    char     geoip_url[SETTINGS_URL_MAX];   /* a geoip .dat, or a list url with %s */
 } daemon_settings_t;
 
 typedef enum {

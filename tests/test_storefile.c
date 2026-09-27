@@ -144,7 +144,7 @@ int main(void) {
            daemon_settings_set(&probe, "force_pf_mode", 13, "8", 1) == SETTINGS_ERR_VALUE);
         ok("a backend name this build does not have is refused",
            daemon_settings_set(&probe, "force_backend", 13, "rust", 4) == SETTINGS_ERR_VALUE);
-        char dump[1024];
+        char dump[4096];
         size_t dump_len = 0;
         ok("the dump emits every override in the words SET takes back",
            daemon_settings_serialize(&probe, dump, sizeof dump, &dump_len) == 0 &&

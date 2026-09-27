@@ -33,6 +33,13 @@ typedef struct {
 void routing_set_policy(int bypass_lan, const ruleset_t *port_rules);
 int routing_policy_bypass_lan(void);
 
+/* legacyray kill switch: while a tunnel is up, udp other than dns and ntp
+   is dropped instead of leaving beside it (quic, stun, games), in the pf
+   and the ipfw rule sets alike. tcp already has nowhere to go but the
+   tunnel, and ipv6 is dropped either way */
+void routing_set_kill_switch(int on);
+int routing_kill_switch(void);
+
 routing_status_t routing_ipfw_rules(const char *server_ip,
                                     int redir_port, int socks_port,
                                     int dns_local_port,

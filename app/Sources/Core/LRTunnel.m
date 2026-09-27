@@ -2,8 +2,16 @@
 #import "LRDaemonClient.h"
 #import "LRCatalog.h"
 #import "LRActivityLog.h"
+#import "control.h"
 #import <fcntl.h>
 #import <unistd.h>
+#import <errno.h>
+#import <signal.h>
+#import <stdio.h>
+#import <sys/types.h>
+#import <sys/socket.h>
+#import <ifaddrs.h>
+#import <net/if.h>
 
 NSString * const LRTunnelDidChangeNotification = @"LRTunnelDidChangeNotification";
 NSString * const LRTunnelTickNotification = @"LRTunnelTickNotification";
@@ -39,8 +47,9 @@ static void LRClearStatusBadge(void) {
 }
 
 - (void)dealloc {
-    [_timer invalidate];
-    [_timer release];
+    [self stop];
+    [_stream release];
+    [_awgInterface release];
     [_lastError release];
     [super dealloc];
 }
@@ -67,27 +76,127 @@ static void LRClearStatusBadge(void) {
         _speedUp = _speedDown = 0;
         _uptime = 0;
     }
+    [self updateTickTimer];
     [self notifyChange];
 }
 
-#pragma mark polling
+#pragma mark monitoring
+
+#define LR_AWG_PID_PATH     "/var/run/legacyrayawgd.pid"
+#define LR_AWG_STATUS_PATH  @"/var/run/legacyrayawgd.status"
+#define LR_AWG_STATUS_NOTE  "com.legacyray.awg.status"
+#define LR_WATCH_RENEW      20.0
+
+static void LRAWGStatusChanged(CFNotificationCenterRef center, void *observer,
+                               CFStringRef name, const void *object,
+                               CFDictionaryRef info) {
+    [[LRTunnel shared] performSelectorOnMainThread:@selector(awgStatusChanged)
+                                        withObject:nil waitUntilDone:NO];
+}
+
+/* the helper runs as root and the app as mobile, so kill answers EPERM for a
+   live process and ESRCH for a dead one; either way no helper is spawned */
+static BOOL LRAWGRunning(void) {
+    FILE *f = fopen(LR_AWG_PID_PATH, "r");
+    if (!f) return NO;
+    int pid = 0;
+    int got = fscanf(f, "%d", &pid);
+    fclose(f);
+    if (got != 1 || pid <= 1) return NO;
+    return kill(pid, 0) == 0 || errno == EPERM;
+}
+
+/* "connected utun3", "connecting", "error ...", "idle" */
+static NSString *LRAWGStatusText(void) {
+    if (!LRAWGRunning()) return @"idle";
+    NSString *text = LRTrim([NSString stringWithContentsOfFile:LR_AWG_STATUS_PATH
+                                                      encoding:NSUTF8StringEncoding error:NULL]);
+    return [text length] ? text : @"connecting";
+}
+
+/* bytes through an interface, from the kernel's own counters */
+static BOOL LRInterfaceBytes(NSString *name, uint64_t *inBytes, uint64_t *outBytes) {
+    struct ifaddrs *list = NULL;
+    if (!name || getifaddrs(&list) != 0) return NO;
+    BOOL found = NO;
+    const char *want = [name UTF8String];
+    for (struct ifaddrs *it = list; it; it = it->ifa_next) {
+        if (!it->ifa_addr || it->ifa_addr->sa_family != AF_LINK || !it->ifa_data) continue;
+        if (strcmp(it->ifa_name, want) != 0) continue;
+        const struct if_data *d = (const struct if_data *)it->ifa_data;
+        *inBytes = d->ifi_ibytes;
+        *outBytes = d->ifi_obytes;
+        found = YES;
+        break;
+    }
+    freeifaddrs(list);
+    return found;
+}
+
+- (BOOL)awgSelected {
+    return _activeBackend == LRBackendAmneziaWG || [LRPrefs selectedBackend] == LRBackendAmneziaWG;
+}
+
+- (void)updateTickTimer {
+    BOOL want = _active && _state == LRTunnelConnected;
+    if (want && !_timer) {
+        _timer = [[NSTimer scheduledTimerWithTimeInterval:1.0 target:self
+                                                 selector:@selector(timerFired:)
+                                                 userInfo:nil repeats:YES] retain];
+    } else if (!want && _timer) {
+        [_timer invalidate];
+        [_timer release];
+        _timer = nil;
+    }
+}
 
 - (void)start {
-    if (_timer) return;
-    _timer = [[NSTimer scheduledTimerWithTimeInterval:1.0 target:self
-                                             selector:@selector(timerFired:)
-                                             userInfo:nil repeats:YES] retain];
+    if (_active) return;
+    _active = YES;
+    static BOOL observing = NO;
+    if (!observing) {
+        observing = YES;
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL,
+                                        LRAWGStatusChanged, CFSTR(LR_AWG_STATUS_NOTE), NULL,
+                                        CFNotificationSuspensionBehaviorCoalesce);
+    }
+    if (!_stream) _stream = [[LRStatusStream alloc] initWithDelegate:self];
+    [_stream open];
+    if (!_renewTimer)
+        _renewTimer = [[NSTimer scheduledTimerWithTimeInterval:LR_WATCH_RENEW target:self
+                                                      selector:@selector(renewWatch:)
+                                                      userInfo:nil repeats:YES] retain];
     [self pollNow];
+    [self updateTickTimer];
 }
 
 - (void)stop {
-    [_timer invalidate];
-    [_timer release];
-    _timer = nil;
+    _active = NO;
+    [_stream close];
+    [_renewTimer invalidate];
+    [_renewTimer release];
+    _renewTimer = nil;
+    [_retryTimer invalidate];
+    [_retryTimer release];
+    _retryTimer = nil;
+    [self updateTickTimer];
+}
+
+- (void)renewWatch:(NSTimer *)timer {
+    if ([_stream isOpen]) [_stream renew];
+}
+
+- (void)retryStream:(NSTimer *)timer {
+    [_retryTimer release];
+    _retryTimer = nil;
+    if (_active) [_stream open];
 }
 
 - (void)timerFired:(NSTimer *)timer {
-    [self pollNow];
+    if (_activeBackend == LRBackendAmneziaWG && _awgInterface) {
+        uint64_t in = 0, out = 0;
+        if (LRInterfaceBytes(_awgInterface, &in, &out)) [self applySampleUp:out down:in];
+    }
     [[NSNotificationCenter defaultCenter] postNotificationName:LRTunnelTickNotification object:self];
 }
 
@@ -118,25 +227,80 @@ static void LRClearStatusBadge(void) {
     _bytesDown = down;
 }
 
-- (void)pollNow {
-    if (_polling) return;
-    _polling = YES;
-    if (_activeBackend == LRBackendAmneziaWG || [LRPrefs selectedBackend] == LRBackendAmneziaWG) {
-        [[LRDaemonClient shared] awgStatus:^(NSString *status) {
-            NSString *s = LRTrim(status);
-            if ([s hasPrefix:@"connected"] || [s hasPrefix:@"connecting"]) {
-                _polling = NO;
-                _activeBackend = LRBackendAmneziaWG;
-                if ([s hasPrefix:@"connected"] && _state != LRTunnelConnected) _uptimeBase = [NSDate timeIntervalSinceReferenceDate];
-                if (!_busy) [self setState:[s hasPrefix:@"connected"] ? LRTunnelConnected
-                                                                    : LRTunnelConnecting];
-                return;
-            }
-            if (_activeBackend == LRBackendAmneziaWG) _activeBackend = LRBackendServer;
-            [self pollDaemon];
-        }];
+#pragma mark stream
+
+- (void)statusStream:(LRStatusStream *)stream line:(NSString *)line {
+    if ([line hasPrefix:@"STAT "]) {
+        NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
+        uint64_t up = 0, down = 0;
+        if (_activeBackend == LRBackendServer &&
+            ctl_parse_stat([data bytes], [data length], &up, &down) == CTL_OK)
+            [self applySampleUp:up down:down];
         return;
     }
+    if (![line hasPrefix:@"STATE "]) return;
+    if (_busy || _activeBackend == LRBackendAmneziaWG) return;
+    long uptime = 0;
+    NSString *name = LRStateFromReply(line, &uptime);
+    if (!name) return;
+    LRTunnelState st = [self stateFromName:name];
+    if (st == LRTunnelConnected) {
+        _uptime = uptime;
+        _uptimeBase = [NSDate timeIntervalSinceReferenceDate] - uptime;
+    }
+    [self setState:st];
+}
+
+- (void)statusStreamClosed:(LRStatusStream *)stream {
+    if (!_active) return;
+    if (!_busy && _activeBackend == LRBackendServer && ![self awgSelected])
+        [self setState:LRTunnelOffline];
+    if (!_retryTimer)
+        _retryTimer = [[NSTimer scheduledTimerWithTimeInterval:4.0 target:self
+                                                      selector:@selector(retryStream:)
+                                                      userInfo:nil repeats:NO] retain];
+}
+
+#pragma mark amneziawg
+
+- (void)awgStatusChanged {
+    if (!_active || _busy) return;
+    [self applyAWGStatus:LRAWGStatusText()];
+}
+
+/* returns NO when amneziawg is not running, so the caller asks the daemon */
+- (BOOL)applyAWGStatus:(NSString *)s {
+    if ([s hasPrefix:@"connected"] || [s hasPrefix:@"connecting"]) {
+        _activeBackend = LRBackendAmneziaWG;
+        BOOL up = [s hasPrefix:@"connected"];
+        NSArray *words = [s componentsSeparatedByString:@" "];
+        [_awgInterface release];
+        _awgInterface = up && [words count] > 1 ? [[words objectAtIndex:1] copy] : nil;
+        if (up && _state != LRTunnelConnected) {
+            _uptimeBase = [NSDate timeIntervalSinceReferenceDate];
+            _lastSampleTime = 0;
+        }
+        [self setState:up ? LRTunnelConnected : LRTunnelConnecting];
+        return YES;
+    }
+    [_awgInterface release];
+    _awgInterface = nil;
+    if (_activeBackend == LRBackendAmneziaWG) {
+        _activeBackend = LRBackendServer;
+        if ([s hasPrefix:@"error"]) {
+            self.lastError = [s length] > 6 ? [s substringFromIndex:6] : s;
+            [self setState:LRTunnelError];
+        } else {
+            [self setState:LRTunnelIdle];
+        }
+    }
+    return NO;
+}
+
+- (void)pollNow {
+    if (_polling) return;
+    if ([self awgSelected] && [self applyAWGStatus:LRAWGStatusText()]) return;
+    _polling = YES;
     [self pollDaemon];
 }
 
@@ -314,7 +478,9 @@ static void LRClearStatusBadge(void) {
             _busy = NO;
             [self setState:LRTunnelConnecting];
             LRLog(@"tunnel", @"amneziawg started");
-            [self performSelector:@selector(pollNow) withObject:nil afterDelay:2.0];
+            /* the helper posts its status as it changes; this picks up
+               anything it said while the start command was running */
+            [self applyAWGStatus:LRAWGStatusText()];
         }];
     }];
 }

@@ -17,6 +17,8 @@ const char *rule_type_name(rule_type_t type) {
     if (type == RULE_TYPE_IP_CIDR) return "ip-cidr";
     if (type == RULE_TYPE_DOMAIN_FULL) return "domain";
     if (type == RULE_TYPE_PORT) return "port";
+    if (type == RULE_TYPE_GEOSITE) return "geosite";
+    if (type == RULE_TYPE_GEOIP) return "geoip";
     return NULL;
 }
 
@@ -55,6 +57,10 @@ static int parse_type(const char *text, size_t len, rule_type_t *out) {
         *out = RULE_TYPE_DOMAIN_FULL;
     else if (len == 4 && memcmp(text, "port", 4) == 0)
         *out = RULE_TYPE_PORT;
+    else if (len == 7 && memcmp(text, "geosite", 7) == 0)
+        *out = RULE_TYPE_GEOSITE;
+    else if (len == 5 && memcmp(text, "geoip", 5) == 0)
+        *out = RULE_TYPE_GEOIP;
     else return -1;
     return 0;
 }
@@ -80,6 +86,26 @@ static int normalize_domain(const char *text, size_t len, char *out, size_t cap)
         ++label;
     }
     if (label == 0 || label > 63) return -1;
+    out[len] = '\0';
+    return 0;
+}
+
+/* a geosite / geoip code, the same canonical form geo.c writes files for:
+   lower case [a-z0-9._-!], one optional @attribute */
+static int normalize_geo_code(const char *text, size_t len, char *out, size_t cap) {
+    if (len == 0 || len >= cap || len >= 64) return -1;
+    int at = 0;
+    for (size_t i = 0; i < len; ++i) {
+        unsigned char c = (unsigned char)text[i];
+        if (c == '@') {
+            if (at || i == 0 || i + 1 == len) return -1;
+            at = 1;
+            out[i] = '@';
+            continue;
+        }
+        if (!(isalnum(c) || c == '-' || c == '_' || c == '.' || c == '!')) return -1;
+        out[i] = (char)tolower(c);
+    }
     out[len] = '\0';
     return 0;
 }
@@ -181,6 +207,11 @@ rules_status_t rules_parse(const char *text, size_t len, rule_t *out) {
         if (parse_cidr(out, value, value_len) != 0) return RULES_ERR_VALUE;
     } else if (out->type == RULE_TYPE_PORT) {
         if (parse_port_range(out, value, value_len) != 0) return RULES_ERR_VALUE;
+    } else if (out->type == RULE_TYPE_GEOSITE || out->type == RULE_TYPE_GEOIP) {
+        if (normalize_geo_code(value, value_len, out->value, sizeof out->value) != 0)
+            return RULES_ERR_VALUE;
+        if (out->type == RULE_TYPE_GEOIP && strchr(out->value, '@'))
+            return RULES_ERR_VALUE;
     } else if (normalize_domain(value, value_len, out->value,
                                 sizeof out->value) != 0) {
         return RULES_ERR_VALUE;
@@ -232,6 +263,12 @@ rules_status_t ruleset_remove(ruleset_t *rules, size_t index) {
     return RULES_OK;
 }
 
+static rules_geo_site_fn g_geo_site;
+
+void rules_set_geo_site_matcher(rules_geo_site_fn fn) {
+    g_geo_site = fn;
+}
+
 static int suffix_matches(const char *domain, const char *suffix) {
     size_t dl = strlen(domain);
     size_t sl = strlen(suffix);
@@ -255,7 +292,9 @@ rule_action_t ruleset_match_domain(ruleset_t *rules, const char *domain,
             : rule->type == RULE_TYPE_DOMAIN_KEYWORD
                 ? strstr(normalized, rule->value) != NULL
                 : rule->type == RULE_TYPE_DOMAIN_FULL
-                    ? strcmp(normalized, rule->value) == 0 : 0;
+                    ? strcmp(normalized, rule->value) == 0
+                    : rule->type == RULE_TYPE_GEOSITE && g_geo_site
+                        ? g_geo_site(rule->value, normalized) != 0 : 0;
         int rank = action_rank(rule->action);
         if (match && rank > best_rank) {
             best_rank = rank;

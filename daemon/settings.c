@@ -1,4 +1,5 @@
 #include "settings.h"
+#include <ctype.h>
 
 #include "routing.h"
 
@@ -32,6 +33,33 @@ void daemon_settings_defaults(daemon_settings_t *s) {
     s->prefer_chacha = 1;
     snprintf(s->xray_version, sizeof s->xray_version, "26.7.28");
     snprintf(s->sub_user_agent, sizeof s->sub_user_agent, "Happ/3.26.1");
+    s->kill_switch = 0;
+    s->fragment = 0;
+    s->fragment_min = 100;
+    s->fragment_max = 200;
+    s->fragment_delay = 10;
+    snprintf(s->geosite_url, sizeof s->geosite_url, "%s", LR_DEFAULT_GEOSITE_URL);
+    snprintf(s->geoip_url, sizeof s->geoip_url, "%s", LR_DEFAULT_GEOIP_URL);
+}
+
+/* http(s), printable, no spaces; a geoip list url may carry one %s */
+static int url_ok(const char *val, size_t len, size_t cap, int allow_country) {
+    if (len == 0 || len >= cap) return 0;
+    if (!(len > 7 && strncmp(val, "http://", 7) == 0) &&
+        !(len > 8 && strncmp(val, "https://", 8) == 0))
+        return 0;
+    int percents = 0;
+    for (size_t i = 0; i < len; ++i) {
+        unsigned char c = (unsigned char)val[i];
+        if (c <= 0x20 || c == 0x7f) return 0;
+        if (c == '%') {
+            if (i + 1 < len && val[i + 1] == 's') { ++percents; ++i; continue; }
+            if (i + 2 < len && isxdigit((unsigned char)val[i + 1]) &&
+                isxdigit((unsigned char)val[i + 2])) continue;
+            return 0;
+        }
+    }
+    return percents == 0 || (allow_country && percents == 1);
 }
 
 /* x.y.z with every part 0..255, the shape the reality session id carries */
@@ -258,6 +286,52 @@ settings_status_t daemon_settings_set(daemon_settings_t *s,
         s->xray_version[val_len] = '\0';
         return SETTINGS_OK;
     }
+    if (key_is(key, key_len, "kill_switch")) {
+        int b;
+        if (parse_bool01(val, ve, &b) != 0) return SETTINGS_ERR_VALUE;
+        s->kill_switch = b;
+        return SETTINGS_OK;
+    }
+    if (key_is(key, key_len, "fragment")) {
+        int b;
+        if (parse_bool01(val, ve, &b) != 0) return SETTINGS_ERR_VALUE;
+        s->fragment = b;
+        return SETTINGS_OK;
+    }
+    if (key_is(key, key_len, "fragment_size")) {
+        /* "10-30" or a single "20" */
+        const char *dash = memchr(val, '-', val_len);
+        int lo, hi;
+        if (dash) {
+            if (parse_bounded_int(val, dash, 1, 1000, &lo) != 0 ||
+                parse_bounded_int(dash + 1, ve, 1, 1000, &hi) != 0 || hi < lo)
+                return SETTINGS_ERR_VALUE;
+        } else {
+            if (parse_bounded_int(val, ve, 1, 1000, &lo) != 0) return SETTINGS_ERR_VALUE;
+            hi = lo;
+        }
+        s->fragment_min = lo;
+        s->fragment_max = hi;
+        return SETTINGS_OK;
+    }
+    if (key_is(key, key_len, "fragment_delay")) {
+        int v;
+        if (parse_bounded_int(val, ve, 0, 500, &v) != 0) return SETTINGS_ERR_VALUE;
+        s->fragment_delay = v;
+        return SETTINGS_OK;
+    }
+    if (key_is(key, key_len, "geosite_url")) {
+        if (!url_ok(val, val_len, sizeof s->geosite_url, 0)) return SETTINGS_ERR_VALUE;
+        memcpy(s->geosite_url, val, val_len);
+        s->geosite_url[val_len] = '\0';
+        return SETTINGS_OK;
+    }
+    if (key_is(key, key_len, "geoip_url")) {
+        if (!url_ok(val, val_len, sizeof s->geoip_url, 1)) return SETTINGS_ERR_VALUE;
+        memcpy(s->geoip_url, val, val_len);
+        s->geoip_url[val_len] = '\0';
+        return SETTINGS_OK;
+    }
     if (key_is(key, key_len, "sub_user_agent")) {
         /* spaces are fine inside a user agent; the SET line keeps everything
            after the key as the value */
@@ -344,6 +418,14 @@ int daemon_settings_serialize(const daemon_settings_t *s, char *buf, size_t cap,
     SETTINGS_EMIT("SET prefer_chacha %d\n", s->prefer_chacha ? 1 : 0);
     SETTINGS_EMIT("SET xray_version %s\n", s->xray_version);
     SETTINGS_EMIT("SET sub_user_agent %s\n", s->sub_user_agent);
+    SETTINGS_EMIT("SET kill_switch %d\n", s->kill_switch ? 1 : 0);
+    SETTINGS_EMIT("SET fragment %d\n", s->fragment ? 1 : 0);
+    char range[24];
+    snprintf(range, sizeof range, "%d-%d", s->fragment_min, s->fragment_max);
+    SETTINGS_EMIT("SET fragment_size %s\n", range);
+    SETTINGS_EMIT("SET fragment_delay %d\n", s->fragment_delay);
+    SETTINGS_EMIT("SET geosite_url %s\n", s->geosite_url);
+    SETTINGS_EMIT("SET geoip_url %s\n", s->geoip_url);
 
 #undef SETTINGS_EMIT
 

@@ -29,6 +29,8 @@
 #include <poll.h>
 #include <unistd.h>
 #include "netwatch.h"
+#include "geo_ctl.h"
+#include "core/geo.h"
 
 static volatile sig_atomic_t g_stop = 0;
 /* the managed loop can sleep in poll for minutes, so a stop request also
@@ -212,6 +214,7 @@ static int run_managed(const char *ctl_path, const char *config_path,
     ctl_server_set_flush(&cs, daemon_ctl_flush);
     ctl_server_set_native_config(&cs, daemon_ctl_native_config);
     ctl_server_set_stats(&cs, daemon_ctl_stats);
+    ctl_server_set_geo(&cs, daemon_ctl_geo);
     daemon_ctl_set_rules(&dc, &cs.engine.store.rules);
 
     if (config_path && config_path[0]) {
@@ -222,6 +225,11 @@ static int run_managed(const char *ctl_path, const char *config_path,
             fprintf(stderr, "legacyrayd: loaded %zu server(s) from %s\n",
                     cs.engine.store.n, config_path);
     }
+
+/* the dns proxy consults geosite sets as soon as a tunnel is up, and the
+   lists extracted last time are already on disk */
+    rules_set_geo_site_matcher(geo_site_match);
+    (void)geo_ctl_reload(&cs.engine.store.rules, NULL, 0);
 
     install_signals();
     if (socks_public) {

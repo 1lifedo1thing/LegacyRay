@@ -1,6 +1,7 @@
 #define _DEFAULT_SOURCE
 
 #include "reality_handshake.h"
+#include "frag.h"
 #include "senko_trace.h"
 
 #include "reality_crypto.h"
@@ -380,7 +381,16 @@ void *reality_handshake_open(int fd, const rh_params_t *p, rh_status_t *err) {
     tls13_transcript_update(&tr, hello, hello_len);
 
     stage = "ClientHello send";
-    if (write_plaintext_record(fd, CT_HANDSHAKE, hello, hello_len) != 0)
+    if (frag_enabled() && hello_len + 5 <= 4096) {
+/* one buffer, so the fragments cut through the record header and the hello
+   alike instead of the header always going out alone */
+        uint8_t rec[4096];
+        rec[0] = CT_HANDSHAKE; rec[1] = 0x03; rec[2] = 0x03;
+        rec[3] = (uint8_t)(hello_len >> 8); rec[4] = (uint8_t)(hello_len & 0xff);
+        memcpy(rec + 5, hello, hello_len);
+        if (frag_write_all(fd, rec, hello_len + 5, RH_HS_IO_BUDGET_MS) != 0)
+            FAIL(RH_ERR_IO);
+    } else if (write_plaintext_record(fd, CT_HANDSHAKE, hello, hello_len) != 0)
         FAIL(RH_ERR_IO);
 
     stage = "ServerHello read";
@@ -984,5 +994,5 @@ static void rh_close(void *handle) {
 }
 
 const transport_vt_t transport_reality = {
-    rh_open, rh_read, rh_write, rh_raw_write, rh_close, rh_want_write
+    rh_open, rh_read, rh_write, rh_raw_write, rh_close, rh_want_write, NULL
 };

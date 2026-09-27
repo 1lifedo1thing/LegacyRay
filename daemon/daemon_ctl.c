@@ -11,6 +11,8 @@
 #include "core/net_safe.h"
 #include "core/url.h"
 #include "core/tls_clienthello.h"
+#include "core/frag.h"
+#include "geo_ctl.h"
 #include "core/control.h"
 #include "core/senko_trace.h"
 #include "core/dns_cache.h"
@@ -74,6 +76,8 @@ static void daemon_settings_publish(const daemon_settings_t *s, const ruleset_t 
     (void)reality_set_client_version(s->xray_version);
     (void)url_set_default_user_agent(s->sub_user_agent);
     tls_ch_set_prefer_chacha(s->prefer_chacha);
+    routing_set_kill_switch(s->kill_switch);
+    frag_configure(s->fragment, s->fragment_min, s->fragment_max, s->fragment_delay);
 }
 
 void daemon_ctl_set_settings(daemon_ctl_t *d, const daemon_settings_t *s) {
@@ -344,6 +348,7 @@ int daemon_ctl_apply(void *ctx, const ctl_action_t *action) {
                         fprintf(stderr, "legacyrayd: go backend failed: %s\n",
                                 backend_reason[0] ? backend_reason : "unknown error");
                 } else {
+                    (void)geo_ctl_reload(active_rules(d), NULL, 0);
                     routing_ok = c_backend_start(&d->c_backend, d->loop,
                                                  (int)loop_listen_port(d->loop),
                                                  first_ip, ip_list,
@@ -1025,10 +1030,51 @@ static int subfetch_dial(void *ctx, const char *host, uint16_t port) {
     return subfetch_dial_direct(host, port);
 }
 
+static int daemon_ctl_fetch_timeout(void *ctx, const char *url,
+                                    const char *request_header,
+                                    unsigned char *buf, size_t cap, size_t *len,
+                                    ctl_fetch_meta_t *meta, int timeout_ms);
+
 int daemon_ctl_fetch(void *ctx, const char *url,
                      const char *request_header,
                      unsigned char *buf, size_t cap, size_t *len,
                      ctl_fetch_meta_t *meta) {
+    return daemon_ctl_fetch_timeout(ctx, url, request_header, buf, cap, len, meta, 15000);
+}
+
+static int geo_fetch(void *ctx, const char *url, unsigned char *buf, size_t cap,
+                     size_t *len, int timeout_ms) {
+    return daemon_ctl_fetch_timeout(ctx, url, NULL, buf, cap, len, NULL, timeout_ms);
+}
+
+int daemon_ctl_geo(void *ctx, const char *what, char *out, size_t cap, size_t *len) {
+    daemon_ctl_t *d = (daemon_ctl_t *)ctx;
+    if (!d || !what || !out || cap < 64 || !len) return -1;
+    char msg[384];
+    int rc = 0;
+    if (strcmp(what, "update") == 0)
+        rc = geo_ctl_update(geo_fetch, d, &d->settings, d->rules, msg, sizeof msg);
+    else if (strcmp(what, "status") == 0)
+        (void)geo_ctl_reload(d->rules, msg, sizeof msg);
+    else
+        return -1;
+    size_t off = geo_ctl_status(d->rules, out, cap - 1);
+    char ln[448];
+    size_t ln_len = 0;
+    if (rc == 0) (void)ctl_build_ok(msg, ln, sizeof ln, &ln_len);
+    else (void)ctl_build_err(msg, ln, sizeof ln, &ln_len);
+    if (ln_len && off + ln_len < cap) {
+        memcpy(out + off, ln, ln_len);
+        off += ln_len;
+    }
+    *len = off;
+    return 0;
+}
+
+static int daemon_ctl_fetch_timeout(void *ctx, const char *url,
+                                    const char *request_header,
+                                    unsigned char *buf, size_t cap, size_t *len,
+                                    ctl_fetch_meta_t *meta, int timeout_ms) {
     fetch_dial_ctx_t dial_ctx = { ctx, 0 };
     subfetch_cfg_t cfg;
     memset(&cfg, 0, sizeof cfg);
@@ -1042,7 +1088,7 @@ int daemon_ctl_fetch(void *ctx, const char *url,
     cfg.max_redirects = 5;
 
     subfetch_info_t info;
-    subfetch_status_t r = subfetch_get_info(&cfg, url, buf, cap, len, 15000, &info);
+    subfetch_status_t r = subfetch_get_info(&cfg, url, buf, cap, len, timeout_ms, &info);
 /* the selected server dying mid-fetch and a genuinely unreachable url look
    identical here (dial/transport failure), so retry once bypassing the
    tunnel before giving up: a dead server must not also block every
@@ -1051,7 +1097,7 @@ int daemon_ctl_fetch(void *ctx, const char *url,
         !dial_ctx.force_direct) {
         dial_ctx.force_direct = 1;
         fprintf(stderr, "legacyrayd: subfetch retrying direct, bypassing the tunnel\n");
-        r = subfetch_get_info(&cfg, url, buf, cap, len, 15000, &info);
+        r = subfetch_get_info(&cfg, url, buf, cap, len, timeout_ms, &info);
     }
     if (r != SUBFETCH_OK) {
         const char *why = "unknown";

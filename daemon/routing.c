@@ -15,6 +15,16 @@ void routing_set_policy(int bypass_lan, const ruleset_t *port_rules) {
     g_port_rules = port_rules;
 }
 
+static int g_kill_switch;
+
+void routing_set_kill_switch(int on) {
+    g_kill_switch = on ? 1 : 0;
+}
+
+int routing_kill_switch(void) {
+    return g_kill_switch;
+}
+
 int routing_policy_bypass_lan(void) {
     return g_bypass_lan;
 }
@@ -102,6 +112,22 @@ routing_status_t routing_ipfw_rules(const char *server_ip,
 
     if (add_rule(rules, cap, &c, 12020, "fwd 127.0.0.1,%d tcp from any to any", redir_port) != 0)
         return ROUTING_ERR_SPACE;
+
+    if (g_kill_switch) {
+        if (add_rule(rules, cap, &c, 12021, "allow udp from any to 127.0.0.1") != 0 ||
+            add_rule(rules, cap, &c, 12022, "allow udp from any to %s", server_ip) != 0 ||
+            add_rule(rules, cap, &c, 12023, "allow udp from any to any 123") != 0 ||
+            add_rule(rules, cap, &c, 12024, "allow udp from any to 224.0.0.0/4") != 0 ||
+            add_rule(rules, cap, &c, 12025, "allow udp from any to 255.255.255.255") != 0)
+            return ROUTING_ERR_SPACE;
+        if (g_bypass_lan &&
+            (add_rule(rules, cap, &c, 12026, "allow udp from any to 10.0.0.0/8") != 0 ||
+             add_rule(rules, cap, &c, 12027, "allow udp from any to 172.16.0.0/12") != 0 ||
+             add_rule(rules, cap, &c, 12028, "allow udp from any to 192.168.0.0/16") != 0))
+            return ROUTING_ERR_SPACE;
+        if (add_rule(rules, cap, &c, 12029, "deny udp from any to any") != 0)
+            return ROUTING_ERR_SPACE;
+    }
 
     *out_count = c;
     return ROUTING_OK;
@@ -303,11 +329,18 @@ static void pf_ip_blocks(pf_w_t *w, const ruleset_t *rules,
 /* the trailing block-udp443 / block-inet6 / pass-out triplet per interface, shared by several modes */
 static void pf_block_triplet(pf_w_t *w, const char *ifn) {
     pf_ap(w, "pass in quick on %s inet from <legacyray_bypass> to any keep state\n"
-             "pass out quick on %s inet from any to <legacyray_bypass> keep state\n"
-             "block return out quick on %s inet proto udp from any to ! <legacyray_bypass> port 443\n"
-             "block return out quick on %s inet6 all\n"
+             "pass out quick on %s inet from any to <legacyray_bypass> keep state\n",
+          ifn, ifn);
+    if (g_kill_switch)
+        pf_ap(w, "pass out quick on %s inet proto udp from any to any port { 53, 123 } keep state\n"
+                 "block return out quick on %s inet proto udp from any to ! <legacyray_bypass>\n",
+              ifn, ifn);
+    else
+        pf_ap(w, "block return out quick on %s inet proto udp from any to ! <legacyray_bypass> port 443\n",
+              ifn);
+    pf_ap(w, "block return out quick on %s inet6 all\n"
              "pass out on %s all keep state\n",
-          ifn, ifn, ifn, ifn, ifn);
+          ifn, ifn);
 }
 
 static routing_status_t routing_pf_conf_build(const char *server_ips,

@@ -48,7 +48,10 @@ typedef enum {
    the subscription is a lease the client renews, so an app that is suspended
    with the socket still open stops costing the daemon wakeups on its own.
    WATCH OFF ends it early */
-    CTL_CMD_WATCH
+    CTL_CMD_WATCH,
+/* legacyray: GEO UPDATE downloads geosite / geoip data, GEO STATUS reports
+   what the rules name and how much of it is loaded */
+    CTL_CMD_GEO
 } ctl_cmd_kind_t;
 
 typedef struct {

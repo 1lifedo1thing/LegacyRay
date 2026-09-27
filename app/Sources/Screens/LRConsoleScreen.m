@@ -326,7 +326,37 @@ static UILabel *LRLegendLabel(void) {
     [_dial setSelectedIndex:sel == NSNotFound ? -1 : (NSInteger)sel animated:YES];
 }
 
+/* a console hidden under a pushed screen redraws nothing; it catches up once
+   when it comes back */
+- (BOOL)onScreen {
+    return self.isViewLoaded && self.view.window != nil;
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    if (_stale) {
+        _stale = NO;
+        [self refresh];
+    }
+    [self tick];
+}
+
+- (void)catchUp {
+    if (_stale && [self onScreen]) {
+        _stale = NO;
+        [self refresh];
+        [self tick];
+    }
+}
+
 - (void)refresh {
+    if (![self onScreen] && _display) {
+/* the ios 4 ipad container does not forward appearance calls, so also look
+   again on the next turn of the run loop, when a new console is in place */
+        if (!_stale) [self performSelector:@selector(catchUp) withObject:nil afterDelay:0];
+        _stale = YES;
+        return;
+    }
     LRTunnel *t = [LRTunnel shared];
     LRCatalog *catalog = [LRCatalog shared];
     LRDaemonSettings *ds = [LRDaemonSettings shared];
@@ -386,6 +416,7 @@ static UILabel *LRLegendLabel(void) {
 }
 
 - (void)tick {
+    if (![self onScreen]) return;
     LRTunnel *t = [LRTunnel shared];
     BOOL on = t.state == LRTunnelConnected;
     _display.seconds = on ? [t liveUptime] : 0;

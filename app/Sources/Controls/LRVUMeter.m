@@ -31,19 +31,13 @@
 }
 
 - (void)dealloc {
-    [_link invalidate];
+    free(_path);
     [_caption release];
     [_well release];
     [_needle release];
     [_needleShadow release];
     [_glass release];
     [super dealloc];
-}
-
-- (void)removeFromSuperview {
-    [_link invalidate];
-    _link = nil;
-    [super removeFromSuperview];
 }
 
 - (CGRect)faceRect {
@@ -162,52 +156,89 @@
     [self setNeedsDisplay];
 }
 
+static CATransform3D LRNeedleTransform(double value) {
+    double angle = LR_VU_A0 + (LR_VU_A1 - LR_VU_A0) * value;
+    return CATransform3DMakeRotation((CGFloat)(angle + M_PI_2), 0, 0, 1);
+}
+
 - (void)applyNeedle {
-    double angle = LR_VU_A0 + (LR_VU_A1 - LR_VU_A0) * _value;
-    CGFloat rot = (CGFloat)(angle + M_PI_2);
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    _needle.transform = CATransform3DMakeRotation(rot, 0, 0, 1);
-    _needleShadow.transform = CATransform3DMakeRotation(rot, 0, 0, 1);
+    [_needle removeAnimationForKey:@"swing"];
+    [_needleShadow removeAnimationForKey:@"swing"];
+    _needle.transform = LRNeedleTransform(_value);
+    _needleShadow.transform = LRNeedleTransform(_value);
     [CATransaction commit];
 }
 
-- (void)step:(id)sender {
-    /* a damped spring: the needle swings past a little and settles */
-    const double dt = 1.0 / 30.0, k = 60.0, damping = 9.0;
-    double accel = k * (_target - _value) - damping * _velocity;
-    _velocity += accel * dt;
-    _value += _velocity * dt;
-    if (_value < -0.02) { _value = -0.02; _velocity = 0; }
-    if (_value > 1.03) { _value = 1.03; _velocity = 0; }
-    [self applyNeedle];
-    if (fabs(_target - _value) < 0.002 && fabs(_velocity) < 0.01) {
-        _value = _target;
-        [self applyNeedle];
-        [_link invalidate];
-        _link = nil;
-    }
+#define LR_VU_FPS 60.0
+
+/* the position and speed of the swing in flight, so a new reading picks the
+   needle up where it is instead of snapping it to rest first */
+- (void)currentValue:(double *)value velocity:(double *)velocity {
+    *value = _value;
+    *velocity = 0;
+    if (!_path || !_pathLen) return;
+    double t = CACurrentMediaTime() - _pathStart;
+    NSUInteger i = t <= 0 ? 0 : (NSUInteger)(t * LR_VU_FPS);
+    if (i >= _pathLen) return;
+    *value = _path[2 * i];
+    *velocity = _path[2 * i + 1];
 }
 
 - (void)setValue:(double)value animated:(BOOL)animated {
-    _target = MAX(0.0, MIN(1.0, value));
+    double target = MAX(0.0, MIN(1.0, value));
+    if (fabs(target - _target) < 0.002 && (animated || fabs(target - _value) < 0.002)) return;
+    _target = target;
     if (!animated || !self.window) {
-        _value = _target;
-        _velocity = 0;
+        free(_path);
+        _path = NULL;
+        _pathLen = 0;
+        _value = target;
         [self applyNeedle];
         return;
     }
-    if (!_link) {
-        Class linkClass = NSClassFromString(@"CADisplayLink");
-        if (linkClass) {
-            _link = [linkClass displayLinkWithTarget:self selector:@selector(step:)];
-            [_link setFrameInterval:2];
-            [_link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-        } else {
-            _link = [NSTimer scheduledTimerWithTimeInterval:1.0 / 30.0 target:self
-                                                   selector:@selector(step:) userInfo:nil repeats:YES];
-        }
+
+/* the damped spring the needle always had, integrated once up front. core
+   animation then plays the frames in the render server, and the app itself
+   sleeps through the swing instead of stepping it thirty times a second */
+    double x = 0, v = 0;
+    [self currentValue:&x velocity:&v];
+    const double dt = 1.0 / LR_VU_FPS, k = 60.0, damping = 9.0;
+    NSUInteger cap = (NSUInteger)(LR_VU_FPS * 2.5);
+    double *path = (double *)malloc(sizeof(double) * 2 * cap);
+    if (!path) { _value = target; [self applyNeedle]; return; }
+    NSMutableArray *frames = [NSMutableArray arrayWithCapacity:cap];
+    NSUInteger n = 0;
+    while (n < cap) {
+        double accel = k * (target - x) - damping * v;
+        v += accel * dt;
+        x += v * dt;
+        if (x < -0.02) { x = -0.02; v = 0; }
+        if (x > 1.03) { x = 1.03; v = 0; }
+        path[2 * n] = x;
+        path[2 * n + 1] = v;
+        [frames addObject:[NSValue valueWithCATransform3D:LRNeedleTransform(x)]];
+        n++;
+        if (fabs(target - x) < 0.002 && fabs(v) < 0.01) break;
     }
+    free(_path);
+    _path = path;
+    _pathLen = n;
+    _pathStart = CACurrentMediaTime();
+    _value = target;
+
+    CAKeyframeAnimation *swing = [CAKeyframeAnimation animationWithKeyPath:@"transform"];
+    swing.values = frames;
+    swing.duration = n * dt;
+    swing.calculationMode = kCAAnimationLinear;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    _needle.transform = LRNeedleTransform(target);
+    _needleShadow.transform = LRNeedleTransform(target);
+    [_needle addAnimation:swing forKey:@"swing"];
+    [_needleShadow addAnimation:swing forKey:@"swing"];
+    [CATransaction commit];
 }
 
 - (void)setSpeed:(double)bps {

@@ -22,6 +22,7 @@
     NSArray *_keys;             /* LRButton, the front panel keys */
     NSArray *_dialServers;
     BOOL _embedded;
+    BOOL _stale;                /* something changed while off screen */
     NSString *_shownError;
 }
 /* inside the ipad split the station log is beside the console, so the keys

@@ -363,6 +363,10 @@ void ctl_server_set_flush(ctl_server_t *s, ctl_flush_fn flush) {
     s->flush = flush;
 }
 
+void ctl_server_set_geo(ctl_server_t *s, ctl_geo_fn geo) {
+    if (s) s->geo = geo;
+}
+
 void ctl_server_set_native_config(ctl_server_t *s, ctl_native_config_fn render) {
     if (!s) return;
     s->native_config = render;
@@ -1489,6 +1493,24 @@ static void dispatch_line(ctl_server_t *s, ctl_client_t *c,
         return;
     }
 
+    if (cmd.kind == CTL_CMD_GEO) {
+        char reply[128]; size_t rn = 0;
+        if (!s->geo) {
+            if (ctl_build_err("geo is not available", reply, sizeof reply, &rn) == CTL_OK)
+                client_write(c, reply, rn);
+            return;
+        }
+        static char out[8192];
+        size_t on = 0;
+        if (s->geo(s->apply_ctx, cmd.name, out, sizeof out, &on) != 0 || on == 0) {
+            if (ctl_build_err("geo failed", reply, sizeof reply, &rn) == CTL_OK)
+                client_write(c, reply, rn);
+            return;
+        }
+        client_write(c, out, on);
+        return;
+    }
+
     if (cmd.kind == CTL_CMD_WATCH) {
         char reply[64]; size_t rn = 0;
         int on = cmd.server_index != 0;
@@ -1726,7 +1748,7 @@ static void dispatch_line(ctl_server_t *s, ctl_client_t *c,
    server only reads it, so the dump is answered here. the lines are the same
    SET lines the verb accepts, so a client can hand one straight back */
         char reply[128]; size_t rn = 0;
-        char dump[512];
+        char dump[4096];
         size_t dn = 0;
         if (!s->settings) {
             if (ctl_build_err("settings unavailable", reply, sizeof reply, &rn) == CTL_OK)

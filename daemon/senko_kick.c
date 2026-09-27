@@ -17,6 +17,9 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <notify.h>
+#endif
 #include "../common/senko_paths.h"
 
 extern char **environ;
@@ -528,6 +531,9 @@ static void awg_write_status(const char *text) {
     if (fd < 0) return;
     dprintf(fd, "%s\n", text);
     close(fd);
+#if defined(__APPLE__)
+    (void)notify_post("com.legacyray.awg.status");
+#endif
 }
 
 static int awg_read_status(char *out, size_t cap) {

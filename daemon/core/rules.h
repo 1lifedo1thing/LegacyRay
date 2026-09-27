@@ -19,7 +19,11 @@ typedef enum {
     RULE_TYPE_DOMAIN_FULL,
     /* legacyray: a destination tcp port or an inclusive lo-hi range. names
        never carry a port, so these are enforced by the firewall, not dns */
-    RULE_TYPE_PORT
+    RULE_TYPE_PORT,
+    /* legacyray: a v2fly geosite category ("category-ru") and a geoip
+       country ("ru"); the value is the code, the sets live in geo.c */
+    RULE_TYPE_GEOSITE,
+    RULE_TYPE_GEOIP
 } rule_type_t;
 
 typedef enum {
@@ -70,6 +74,12 @@ rule_action_t ruleset_match_ip(ruleset_t *rules, const char *ip,
 /* how many port rules the firewall layers can carry; ipfw has a fixed number
    range and pf rules are emitted once per interface */
 #define RULESET_MAX_PORT_RULES 8
+
+/* the geosite lookup ruleset_match_domain uses for RULE_TYPE_GEOSITE; the
+   daemon installs geo_site_match, a build without geo data leaves it unset
+   and such rules match nothing */
+typedef int (*rules_geo_site_fn)(const char *code, const char *name);
+void rules_set_geo_site_matcher(rules_geo_site_fn fn);
 
 const char *rule_type_name(rule_type_t type);
 /* 1 when a rule is enforced by the firewall rather than by the dns proxy */

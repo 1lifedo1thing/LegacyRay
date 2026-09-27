@@ -89,6 +89,9 @@ typedef int (*ctl_flush_fn)(void *ctx, const char *what,
 typedef int (*ctl_native_config_fn)(void *ctx, const vl_server_t *server,
                                     char *buf, size_t cap, size_t *len);
 
+/* GEO UPDATE / STATUS: fills out with status lines and a final OK / ERR */
+typedef int (*ctl_geo_fn)(void *ctx, const char *what, char *out, size_t cap, size_t *len);
+
 /* append DIAG lines the daemon owns; the server adds its own before streaming */
 typedef int (*ctl_diag_fn)(void *ctx, char *buf, size_t cap, size_t *len);
 
@@ -126,6 +129,7 @@ typedef struct {
     ctl_flush_fn  flush;
     ctl_native_config_fn native_config;
     ctl_stats_fn stats;
+    ctl_geo_fn   geo;
     uint64_t stat_at_ms;
     int stat_failed;
     void         *apply_ctx;
@@ -198,6 +202,7 @@ void ctl_server_set_diag(ctl_server_t *s, ctl_diag_fn diag);
 void ctl_server_set_fwconf(ctl_server_t *s, ctl_fwconf_fn fwconf);
 void ctl_server_set_flush(ctl_server_t *s, ctl_flush_fn flush);
 void ctl_server_set_native_config(ctl_server_t *s, ctl_native_config_fn render);
+void ctl_server_set_geo(ctl_server_t *s, ctl_geo_fn geo);
 
 int ctl_server_restore_tunnel(ctl_server_t *s);
 
