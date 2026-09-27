@@ -74,11 +74,21 @@
     if (![LRCatalog shared].loaded) [[LRCatalog shared] reload];
 }
 
+- (BOOL)wantsContentUnderHeader {
+    return YES;
+}
+
 - (void)layoutContent {
     _table.frame = self.contentView.bounds;
+    LRApplyHeaderCoverage(_table, self.headerCoverage);
     CGRect b = self.contentView.bounds;
     _empty.frame = CGRectMake(0, 0, b.size.width, b.size.height);
     [self layoutEmpty];
+}
+
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell
+forRowAtIndexPath:(NSIndexPath *)indexPath {
+    cell.backgroundColor = [UIColor clearColor];
 }
 
 #pragma mark model
@@ -193,7 +203,7 @@
     UILabel *title = (UILabel *)[_empty viewWithTag:1];
     UILabel *text = (UILabel *)[_empty viewWithTag:2];
     CGSize ts = [text.text sizeWithFont:text.font constrainedToSize:CGSizeMake(w, 300)];
-    CGFloat y = MAX(30, b.size.height * 0.22f);
+    CGFloat y = MAX(30, b.size.height * 0.22f) + self.headerCoverage;
     title.frame = CGRectMake(x, y, w, 26);
     text.frame = CGRectMake(x, y + 34, w, ceilf(ts.height));
     y += 34 + ceilf(ts.height) + 20;

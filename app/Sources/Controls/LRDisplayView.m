@@ -153,8 +153,16 @@ LR_DISPLAY_SETTER(setDownText, _downText)
         long h = _seconds / 3600, m = (_seconds / 60) % 60;
         clock = [NSString stringWithFormat:@"%03ld:%02ld", MIN(h, 999L), m];
     }
-    LRDrawSevenSegment(ctx, clock, CGPointMake(g.origin.x, CGRectGetMaxY(g) - digitH - 2), digitH,
-                       clockColor, s->glowDim);
+    if (flat) {
+        /* the flat card's clock reads like the ios 7 clock app: thin and large */
+        UIFont *thin = [LRSkin thinFont:floorf(digitH * 1.45f)];
+        CGSize cs = [clock sizeWithFont:thin];
+        [clockColor set];
+        [clock drawAtPoint:CGPointMake(g.origin.x - 1, CGRectGetMaxY(g) - cs.height + 2) withFont:thin];
+    } else {
+        LRDrawSevenSegment(ctx, clock, CGPointMake(g.origin.x, CGRectGetMaxY(g) - digitH - 2), digitH,
+                           clockColor, s->glowDim);
+    }
     UIFont *traffic = [LRSkin bodyFont:11 * scale];
     CGFloat tw = g.size.width * 0.42f;
     if ([_upText length])

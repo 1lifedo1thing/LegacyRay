@@ -74,6 +74,7 @@ $(BIN): $(ALL_OBJ) $(RESOURCES) Resources/entitlements.plist $(wildcard Resource
 	@echo "  link  $(APP_NAME)"
 	@$(LR_CC) $(ALL_OBJ) -o $@ $(LDFLAGS)
 	@$(LR_STRIP) -x $@
+	@python3 ../scripts/set_sdk_version.py $@ 7.0
 	@$(LR_LDID) -SResources/entitlements.plist $@
 	@cp $(RESOURCES) $(APP)/
 	@cp Resources/flags/*.png $(APP)/flags/

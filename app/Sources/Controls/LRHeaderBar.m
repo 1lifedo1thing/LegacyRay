@@ -3,7 +3,7 @@
 
 @implementation LRHeaderBar
 @synthesize titleLabel = _titleLabel, leftButton = _leftButton, rightButton = _rightButton,
-            extraButton = _extraButton;
+            extraButton = _extraButton, topInset = _topInset, translucent = _translucent;
 
 + (UIColor *)glyphColor {
     LRSkin *s = SKIN;
@@ -38,7 +38,46 @@
     return self;
 }
 
+- (void)setTopInset:(CGFloat)inset {
+    if (inset == _topInset) return;
+    _topInset = inset;
+    [self setNeedsLayout];
+    [self setNeedsDisplay];
+}
+
+- (void)setTranslucent:(BOOL)on {
+    if (on == _translucent) return;
+    _translucent = on;
+    if (on) {
+        UIToolbar *bar = [[[UIToolbar alloc] initWithFrame:self.bounds] autorelease];
+        bar.barStyle = UIBarStyleDefault;
+        bar.translucent = YES;
+        bar.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        /* the toolbar's own hairline is on top; a nav bar's is at the bottom */
+        bar.clipsToBounds = YES;
+        bar.userInteractionEnabled = NO;
+        [self insertSubview:bar atIndex:0];
+        _blur = [bar retain];
+        _hairline = [[UIView alloc] init];
+        _hairline.backgroundColor = SKIN->separator;
+        [self addSubview:_hairline];
+        self.backgroundColor = [UIColor clearColor];
+        self.opaque = NO;
+    } else {
+        [_blur removeFromSuperview];
+        [_blur release];
+        _blur = nil;
+        [_hairline removeFromSuperview];
+        [_hairline release];
+        _hairline = nil;
+    }
+    [self setNeedsLayout];
+    [self setNeedsDisplay];
+}
+
 - (void)dealloc {
+    [_blur release];
+    [_hairline release];
     [_titleLabel release];
     [_leftButton release];
     [_rightButton release];
@@ -50,6 +89,7 @@
     CGContextRef ctx = UIGraphicsGetCurrentContext();
     CGRect b = self.bounds;
     LRSkin *s = SKIN;
+    if (_translucent) return;
     if (s->flat) {
         [s->plateTop setFill];
         CGContextFillRect(ctx, b);
@@ -145,25 +185,30 @@
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    CGRect b = self.bounds;
+    CGRect full = self.bounds;
+    _blur.frame = full;
+    _hairline.frame = CGRectMake(0, full.size.height - LRHairline(), full.size.width, LRHairline());
+    [self bringSubviewToFront:_hairline];
+    /* everything below lays out in the 44 points under the status bar */
+    CGRect b = CGRectMake(0, _topInset, full.size.width, full.size.height - _topInset);
     CGFloat side = 0;
     if (_leftButton) {
         CGFloat w = [self widthForButton:_leftButton];
-        _leftButton.frame = CGRectMake(7, roundf((b.size.height - 30) / 2), w, 30);
+        _leftButton.frame = CGRectMake(7, b.origin.y + roundf((b.size.height - 30) / 2), w, 30);
         side = MAX(side, w + 12);
     }
     if (_rightButton) {
         CGFloat w = [self widthForButton:_rightButton];
-        _rightButton.frame = CGRectMake(b.size.width - 7 - w, roundf((b.size.height - 30) / 2), w, 30);
+        _rightButton.frame = CGRectMake(b.size.width - 7 - w, b.origin.y + roundf((b.size.height - 30) / 2), w, 30);
         CGFloat used = w + 12;
         if (_extraButton) {
             CGFloat ew = [self widthForButton:_extraButton];
             _extraButton.frame = CGRectMake(_rightButton.frame.origin.x - 6 - ew,
-                                            roundf((b.size.height - 30) / 2), ew, 30);
+                                            b.origin.y + roundf((b.size.height - 30) / 2), ew, 30);
             used += ew + 6;
         }
         side = MAX(side, used);
     }
-    _titleLabel.frame = CGRectMake(side + 4, 0, b.size.width - 2 * (side + 4), b.size.height);
+    _titleLabel.frame = CGRectMake(side + 4, b.origin.y, b.size.width - 2 * (side + 4), b.size.height);
 }
 @end

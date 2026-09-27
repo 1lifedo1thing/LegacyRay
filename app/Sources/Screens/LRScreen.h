@@ -17,6 +17,7 @@ typedef enum {
     LRBackgroundStyle _backgroundStyle;
     BOOL _hidesHeader;
     BOOL _manualLeftButton;
+    CGFloat _headerCoverage;
 }
 @property (nonatomic, readonly) LRHeaderBar *header;
 @property (nonatomic, readonly) UIView *contentView;
@@ -25,6 +26,11 @@ typedef enum {
 /* set when the screen puts its own key on the left of the header (or none);
    otherwise Back / Done is added automatically */
 @property (nonatomic, assign) BOOL manualLeftButton;
+
+/* flat on ios 7: the content runs under a frosted header and scroll views
+   inset their content by headerCoverage. subclasses with a scroll view say yes */
+- (BOOL)wantsContentUnderHeader;
+@property (nonatomic, readonly) CGFloat headerCoverage;
 
 /* back, or done when this is the root of a modal */
 - (void)close;
@@ -43,3 +49,7 @@ typedef enum {
 @end
 
 UINavigationController *LRNavigationWithRoot(UIViewController *root);
+
+/* give a scroll view room for a header lying over it, keeping it at the top
+   the first time */
+void LRApplyHeaderCoverage(UIScrollView *scroll, CGFloat coverage);

@@ -82,6 +82,21 @@ def meter(cr, x, y, w, h, value, caption):
     text(cr, caption, x + w / 2, y + h * 0.80, h * 0.085, MUTED, 1, 'center')
 
 
+def status_bar(cr, W):
+    """the ios 7 status bar: no strip of its own, dark text on the app"""
+    text(cr, '●●●●○ LegacyNet', 6, 14, 11, INK, 0)
+    text(cr, '9:41', W / 2, 14, 12, INK, 1, 'center')
+    x, y = W - 30, 6
+    cr.rectangle(x, y, 22, 10)
+    cr.set_source_rgba(*INK)
+    cr.set_line_width(1)
+    cr.stroke()
+    cr.rectangle(x + 22, y + 3, 2, 4)
+    cr.fill()
+    cr.rectangle(x + 2, y + 2, 14, 6)
+    cr.fill()
+
+
 def phone(path):
     W, H = 320, 480
     s = cairo.ImageSurface(cairo.FORMAT_ARGB32, (W * 2 + 20) * 2, H * 2)
@@ -91,10 +106,7 @@ def phone(path):
     cr.rectangle(0, 0, W, H)
     cr.set_source_rgba(*hexc('#F7F7F7'))
     cr.fill()
-    cr.rectangle(0, 0, W, 20)
-    cr.set_source_rgba(0, 0, 0, 1)
-    cr.fill()
-    text(cr, '9:41', W / 2, 14, 12, WHITE, 1, 'center')
+    status_bar(cr, W)
     text(cr, 'LegacyRay', W / 2, 52, 22, INK, 0, 'center')
     card(cr, 16, 66, W - 32, 112)
     text(cr, 'CONNECTED', 30, 88, 12, TINT, 1)
@@ -107,7 +119,7 @@ def phone(path):
     flag(cr, 'nl', 30, 97, 16)
     text(cr, 'Amsterdam', 52, 111, 16, INK, 0)
     text(cr, 'VLESS · REALITY · XHTTP  ·  48 ms', 30, 128, 10.5, MUTED)
-    text(cr, '01:24:07', 28, 166, 34, INK, 0, font='Liberation Sans Narrow')
+    text(cr, '01:24:07', 27, 168, 42, INK, 0, font='Lato Light')
     text(cr, '↑ 12.4 MB', W - 30, 150, 11, MUTED, 0, 'right')
     text(cr, '↓ 318 MB', W - 30, 165, 11, MUTED, 0, 'right')
     meter(cr, 16, 190, 138, 82, 0.34, 'UPLINK B/s')
@@ -150,13 +162,10 @@ def phone(path):
     cr.rectangle(0, 0, W, H)
     cr.set_source_rgba(*BG)
     cr.fill()
-    cr.rectangle(0, 0, W, 20)
-    cr.set_source_rgba(0, 0, 0, 1)
+    cr.rectangle(0, 0, W, 64)
+    cr.set_source_rgba(0.973, 0.973, 0.973, 1)
     cr.fill()
-    text(cr, '9:41', W / 2, 14, 12, WHITE, 1, 'center')
-    cr.rectangle(0, 20, W, 44)
-    cr.set_source_rgba(*hexc('#F7F7F7'))
-    cr.fill()
+    status_bar(cr, W)
     cr.rectangle(0, 63.5, W, 0.5)
     cr.set_source_rgba(*LINE)
     cr.fill()

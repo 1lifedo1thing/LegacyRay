@@ -273,11 +273,11 @@
     _dim.alpha = 0;
     _panel.transform = CGAffineTransformMakeScale(0.85f, 0.85f);
     _panel.alpha = 0;
-    [UIView animateWithDuration:0.2 animations:^{
+    LRAnimateIn(0.2, ^{
         _dim.alpha = 1;
         _panel.alpha = 1;
         _panel.transform = CGAffineTransformIdentity;
-    }];
+    });
     if ([_fields count]) [[_fields objectAtIndex:0] becomeFirstResponder];
 }
 

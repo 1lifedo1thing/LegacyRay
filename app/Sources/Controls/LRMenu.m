@@ -296,12 +296,12 @@
     } else {
         _panel.frame = CGRectOffset(rest, 0, rest.size.height);
     }
-    [UIView animateWithDuration:0.22 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+    LRAnimateIn(0.22, ^{
         _dim.alpha = 1;
         _panel.alpha = 1;
         _panel.transform = CGAffineTransformIdentity;
         _panel.frame = rest;
-    } completion:nil];
+    });
 }
 
 - (void)dismiss {

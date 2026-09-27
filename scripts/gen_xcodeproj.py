@@ -282,9 +282,12 @@ app_src_build = [build_file('app', r) for r in app_sources] + \
                 [build_file('app', r, flags=zbar_flags) for r in zbar_refs]
 app_fw_build = [build_file('app', r, weak=w) for r, w in fw_refs] + [build_file('app', r) for r in lib_refs]
 app_res_build = [build_file('app', r) for r in res_build]
+MARK_IOS7 = ('python \\"${SRCROOT}/scripts/set_sdk_version.py\\" '
+             '\\"${TARGET_BUILD_DIR}/${EXECUTABLE_PATH}\\" 7.0')
 app_phases = [phase('PBXSourcesBuildPhase', 'app-src', app_src_build),
               phase('PBXFrameworksBuildPhase', 'app-fw', app_fw_build),
               phase('PBXResourcesBuildPhase', 'app-res', app_res_build),
+              script('app-ios7', 'Mark for iOS 7', MARK_IOS7),
               script('app-sign', 'Fakesign with ldid', FAKESIGN)]
 S = '"$(SRCROOT)'
 app_headers = [S + '/app/third_party/zbar/include"', S + '/app/third_party/zbar/zbar"',

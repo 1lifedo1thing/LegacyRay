@@ -53,8 +53,19 @@
     [self reloadSections];
 }
 
+- (BOOL)wantsContentUnderHeader {
+    return YES;
+}
+
 - (void)layoutContent {
     _tableView.frame = self.contentView.bounds;
+    LRApplyHeaderCoverage(_tableView, self.headerCoverage);
+}
+
+/* ios 7 resets a cell's background just before showing it */
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell
+forRowAtIndexPath:(NSIndexPath *)indexPath {
+    cell.backgroundColor = [UIColor clearColor];
 }
 
 - (NSArray *)buildSections {

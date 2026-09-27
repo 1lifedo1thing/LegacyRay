@@ -1,16 +1,70 @@
 #import "LRScreen.h"
 #import "LRDraw.h"
+#import <objc/runtime.h>
+
+/* swipe from the left edge to go back, the ios 7 way; the delegate keeps it
+   from starting on the root, which would wedge the navigation controller */
+@interface LRPopGestureDelegate : NSObject <UIGestureRecognizerDelegate> {
+    UINavigationController *_nav;
+}
+@end
+
+@implementation LRPopGestureDelegate
+- (id)initWithNavigation:(UINavigationController *)nav {
+    if ((self = [super init])) _nav = nav;
+    return self;
+}
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)g {
+    return [_nav.viewControllers count] > 1;
+}
+@end
 
 UINavigationController *LRNavigationWithRoot(UIViewController *root) {
     UINavigationController *nav = [[[UINavigationController alloc] initWithRootViewController:root]
                                    autorelease];
     nav.navigationBarHidden = YES;
+    if (LRIsIOS7Native() && [nav respondsToSelector:@selector(interactivePopGestureRecognizer)]) {
+        UIGestureRecognizer *g = [nav interactivePopGestureRecognizer];
+        LRPopGestureDelegate *d = [[LRPopGestureDelegate alloc] initWithNavigation:nav];
+        /* the recognizer does not retain its delegate; tie it to the controller */
+        objc_setAssociatedObject(nav, "lr-pop", d, OBJC_ASSOCIATION_RETAIN);
+        [d release];
+        g.delegate = d;
+        g.enabled = YES;
+    }
     return nav;
+}
+
+void LRApplyHeaderCoverage(UIScrollView *scroll, CGFloat coverage) {
+    UIEdgeInsets in = scroll.contentInset;
+    if (in.top == coverage) return;
+    BOOL atTop = scroll.contentOffset.y <= -in.top + 1;
+    in.top = coverage;
+    scroll.contentInset = in;
+    UIEdgeInsets si = scroll.scrollIndicatorInsets;
+    si.top = coverage;
+    scroll.scrollIndicatorInsets = si;
+    if (atTop) scroll.contentOffset = CGPointMake(scroll.contentOffset.x, -coverage);
 }
 
 @implementation LRScreen
 @synthesize header = _header, contentView = _contentView, backgroundStyle = _backgroundStyle,
-            hidesHeader = _hidesHeader, manualLeftButton = _manualLeftButton;
+            hidesHeader = _hidesHeader, manualLeftButton = _manualLeftButton,
+            headerCoverage = _headerCoverage;
+
+- (id)initWithNibName:(NSString *)nib bundle:(NSBundle *)bundle {
+    if ((self = [super initWithNibName:nib bundle:bundle])) {
+        /* the header is ours; ios 7 must not pad scroll views for a bar it
+           does not know about */
+        if ([self respondsToSelector:@selector(setAutomaticallyAdjustsScrollViewInsets:)])
+            [self setAutomaticallyAdjustsScrollViewInsets:NO];
+    }
+    return self;
+}
+
+- (BOOL)wantsContentUnderHeader {
+    return NO;
+}
 
 - (void)dealloc {
     [_header release];
@@ -107,9 +161,23 @@ UINavigationController *LRNavigationWithRoot(UIViewController *root) {
     if (!CGSizeEqualToSize(_backdrop.image.size, b.size))
         _backdrop.image = [self backdropImageForSize:b.size];
     _backdrop.frame = b;
-    CGFloat top = _hidesHeader ? 0 : LR_HEADER_HEIGHT;
-    _header.frame = CGRectMake(0, 0, b.size.width, LR_HEADER_HEIGHT);
-    _contentView.frame = CGRectMake(0, top, b.size.width, b.size.height - top);
+    /* on ios 7 the status bar lies over the top of the screen: the header
+       grows under it, or the content starts below it when there is none */
+    CGFloat inset = LRStatusBarOverlap(self.view);
+    CGFloat headerH = LR_HEADER_HEIGHT + inset;
+    BOOL under = !_hidesHeader && SKIN->flat && LRIsIOS7Native() && [self wantsContentUnderHeader];
+    _header.topInset = inset;
+    _header.translucent = under;
+    _header.frame = CGRectMake(0, 0, b.size.width, headerH);
+    CGFloat top = _hidesHeader ? inset : headerH;
+    if (under) {
+        _contentView.frame = b;
+        _headerCoverage = headerH;
+        [self.view bringSubviewToFront:_header];
+    } else {
+        _contentView.frame = CGRectMake(0, top, b.size.width, b.size.height - top);
+        _headerCoverage = 0;
+    }
     [self layoutContent];
 }
 

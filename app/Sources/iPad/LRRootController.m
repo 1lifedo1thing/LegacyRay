@@ -83,14 +83,17 @@
     _cabinet.frame = b;
     CGFloat gap = flat ? 0.5f : 10;
     CGFloat edge = flat ? 0 : 10;
+    /* ios 7 lays the status bar over the cabinet: the wood shows through it,
+       and the panes start below it. flat panes run under it with their headers */
+    CGFloat top = edge + (flat ? 0 : LRStatusBarOverlap(self.view));
     if (landscape) {
         CGFloat logW = roundf(MIN(390.0f, b.size.width * 0.39f));
-        _logFrame.frame = CGRectMake(edge, edge, logW - edge, b.size.height - edge * 2);
-        _consoleFrame.frame = CGRectMake(logW + gap, edge, b.size.width - logW - gap - edge,
-                                         b.size.height - edge * 2);
+        _logFrame.frame = CGRectMake(edge, top, logW - edge, b.size.height - top - edge);
+        _consoleFrame.frame = CGRectMake(logW + gap, top, b.size.width - logW - gap - edge,
+                                         b.size.height - top - edge);
     } else {
         CGFloat consoleH = roundf(MIN(600.0f, b.size.height * 0.58f));
-        _consoleFrame.frame = CGRectMake(edge, edge, b.size.width - edge * 2, consoleH - edge);
+        _consoleFrame.frame = CGRectMake(edge, top, b.size.width - edge * 2, consoleH - top);
         _logFrame.frame = CGRectMake(edge, consoleH + gap, b.size.width - edge * 2,
                                      b.size.height - consoleH - gap - edge);
     }

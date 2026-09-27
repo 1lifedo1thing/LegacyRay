@@ -74,6 +74,23 @@ def launch(w, h, scale):
     return s
 
 
+def flat_launch(w, h, scale):
+    """ios 7 launch images: the flat shell the app opens into, as apple asks
+    for, with the header under a transparent status bar"""
+    s = cairo.ImageSurface(cairo.FORMAT_RGB24, w * scale, h * scale)
+    cr = cairo.Context(s)
+    cr.scale(scale, scale)
+    cr.set_source_rgb(0.969, 0.969, 0.969)
+    cr.paint()
+    cr.set_source_rgb(0.973, 0.973, 0.973)
+    cr.rectangle(0, 0, w, 64)
+    cr.fill()
+    cr.set_source_rgb(0.698, 0.698, 0.698)
+    cr.rectangle(0, 64 - 1.0 / scale, w, 1.0 / scale)
+    cr.fill()
+    return s
+
+
 def write_wav(name, samples, rate=22050):
     path = os.path.join(OUT, name)
     with wave.open(path, 'wb') as w:
@@ -127,6 +144,13 @@ def main():
     ]
     for name, w, h, scale in launches:
         launch(w, h, scale).write_to_png(os.path.join(OUT, name))
+    flat_launches = [
+        ('LaunchImage-700@2x.png', 320, 480, 2), ('LaunchImage-700-568h@2x.png', 320, 568, 2),
+        ('LaunchImage-700-Portrait~ipad.png', 768, 1024, 1), ('LaunchImage-700-Portrait@2x~ipad.png', 768, 1024, 2),
+        ('LaunchImage-700-Landscape~ipad.png', 1024, 768, 1), ('LaunchImage-700-Landscape@2x~ipad.png', 1024, 768, 2),
+    ]
+    for name, w, h, scale in flat_launches:
+        flat_launch(w, h, scale).write_to_png(os.path.join(OUT, name))
     sounds()
     print('resources written to', os.path.normpath(OUT))
 

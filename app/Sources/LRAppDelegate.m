@@ -42,7 +42,10 @@ static LRAppDelegate *gShared = nil;
         for (UIView *v in [_window subviews]) [v removeFromSuperview];
         [_window addSubview:_root.view];
     }
-    [[UIApplication sharedApplication] setStatusBarStyle:UIStatusBarStyleBlackOpaque animated:NO];
+    LRApplyStatusBarStyle();
+    /* ios 7 tints what little stock ui is left (text cursors, the keyboard's
+       accessory) with the skin's colour */
+    if ([_window respondsToSelector:@selector(setTintColor:)]) [_window setTintColor:SKIN->tint];
 }
 
 - (void)rebuildInterface {

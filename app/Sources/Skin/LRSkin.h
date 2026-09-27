@@ -45,6 +45,7 @@
 + (UIFont *)monoFont:(CGFloat)size;
 /* thin numerals for the flat clock and big figures */
 + (UIFont *)lightFont:(CGFloat)size;
++ (UIFont *)thinFont:(CGFloat)size;
 @end
 
 #define SKIN ([LRSkin current])

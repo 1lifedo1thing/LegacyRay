@@ -95,18 +95,19 @@ static LRToast *gCurrentToast = nil;
     CGFloat maxW = MIN(host.bounds.size.width - 24, 480);
     LRToast *toast = [[LRToast alloc] initWithText:text tape:tape width:maxW];
     CGFloat x = roundf((host.bounds.size.width - toast.bounds.size.width) / 2);
-    CGFloat restY = 50;
+    /* below the header, which on ios 7 also holds the status bar */
+    CGFloat restY = 50 + LRStatusBarOverlap(host);
     toast.frame = CGRectMake(x, -toast.bounds.size.height - 8, toast.bounds.size.width,
                              toast.bounds.size.height);
     toast.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
     if (!SKIN->flat) toast.transform = CGAffineTransformMakeRotation(-0.012f);
     [host addSubview:toast];
     gCurrentToast = toast;
-    [UIView animateWithDuration:0.28 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+    LRAnimateIn(0.28, ^{
         CGRect f = toast.frame;
         f.origin.y = restY;
         toast.frame = f;
-    } completion:nil];
+    });
     NSTimeInterval stay = 2.2 + [text length] / 40.0;
     [UIView animateWithDuration:0.25 delay:stay options:UIViewAnimationOptionCurveEaseIn animations:^{
         CGRect f = toast.frame;

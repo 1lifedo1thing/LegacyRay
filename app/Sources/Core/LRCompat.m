@@ -1,4 +1,55 @@
+#import "LRSkin.h"
 #import "LRCompat.h"
+
+#import <dlfcn.h>
+
+BOOL LRIsIOS7Native(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = 0;
+        if (LR_SYSTEM_AT_LEAST(@"7.0")) {
+            /* the sdk the binary says it was made with; looked up at run time
+               because ios 4 has no such function to link against */
+            uint32_t (*sdk)(void) = (uint32_t (*)(void))dlsym(RTLD_DEFAULT, "dyld_get_program_sdk_version");
+            cached = sdk && sdk() >= 0x00070000 ? 1 : 0;
+        }
+    }
+    return cached == 1;
+}
+
+CGFloat LRStatusBarOverlap(UIView *view) {
+    if (!LRIsIOS7Native() || !view.window) return 0;
+    UIApplication *app = [UIApplication sharedApplication];
+    if (app.statusBarHidden) return 0;
+    CGRect bar = [view convertRect:app.statusBarFrame fromView:nil];
+    CGRect hit = CGRectIntersection(bar, view.bounds);
+    if (CGRectIsNull(hit) || hit.size.height <= 0 || hit.origin.y > 1) return 0;
+    return MIN(CGRectGetMaxY(hit), 40.0f);
+}
+
+void LRApplyStatusBarStyle(void) {
+    UIApplication *app = [UIApplication sharedApplication];
+    LRSkin *s = [LRSkin current];
+    UIStatusBarStyle style;
+    if (LRIsIOS7Native())
+        /* 0 dark text, 1 light text (UIStatusBarStyleLightContent on ios 7) */
+        /* light text over graphite, and over the ipad's walnut cabinet */
+        style = (!s->flat && (s->night || LRIsPad())) ? (UIStatusBarStyle)1 : UIStatusBarStyleDefault;
+    else
+        style = UIStatusBarStyleBlackOpaque;
+    [app setStatusBarStyle:style animated:NO];
+}
+
+void LRAnimateIn(NSTimeInterval duration, void (^animations)(void)) {
+    if ([LRSkin current]->flat &&
+        [UIView respondsToSelector:@selector(animateWithDuration:delay:usingSpringWithDamping:initialSpringVelocity:options:animations:completion:)]) {
+        [UIView animateWithDuration:duration * 1.6 delay:0 usingSpringWithDamping:0.78f initialSpringVelocity:0
+                            options:UIViewAnimationOptionAllowUserInteraction animations:animations completion:nil];
+        return;
+    }
+    [UIView animateWithDuration:duration delay:0 options:UIViewAnimationOptionCurveEaseOut
+                     animations:animations completion:nil];
+}
 
 void LRPresentModal(UIViewController *host, UIViewController *vc, BOOL animated) {
     if (!host || !vc) return;

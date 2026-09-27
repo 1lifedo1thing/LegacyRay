@@ -232,6 +232,13 @@ static UIColor *H(unsigned rgb, CGFloat a) {
     return [self font:@"Helvetica-Bold" size:size fallbackBold:YES];
 }
 + (UIFont *)monoFont:(CGFloat)size { return [self font:@"Courier-Bold" size:size fallbackBold:YES]; }
++ (UIFont *)thinFont:(CGFloat)size {
+    /* the ios 7 weight for big numbers: Thin arrived with ios 7, UltraLight
+       with ios 5; both keep the digits one width, so a clock does not jitter */
+    UIFont *f = [UIFont fontWithName:@"HelveticaNeue-Thin" size:size];
+    if (!f) f = [UIFont fontWithName:@"HelveticaNeue-UltraLight" size:size];
+    return f ? f : [self lightFont:size];
+}
 + (UIFont *)lightFont:(CGFloat)size {
     UIFont *f = [UIFont fontWithName:@"HelveticaNeue-Light" size:size];
     return f ? f : [self font:@"Helvetica" size:size fallbackBold:NO];
