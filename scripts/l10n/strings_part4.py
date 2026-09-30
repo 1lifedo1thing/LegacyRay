@@ -205,4 +205,7 @@ T = [
 ("%@ · %d ms", "%@ · %d мс", "%@ · %d 毫秒"),
 ("Connect to the fastest", "Подключиться к самой быстрой", "连接最快的"),
 ("AmneziaWG profiles", "Профили AmneziaWG", "AmneziaWG 配置"),
+("The routing profiles, split tunnelling and own-server setup follow their ideas. No code is taken from them.", "Профили маршрутизации, раздельное туннелирование и настройка своего сервера сделаны по их образцу. Код оттуда не использовался.", "路由配置、分流和自建服务器参考了它们的思路，未使用其代码。"),
+("SSH for setting up your own server. BSD.", "SSH для настройки своего сервера. BSD.", "用于搭建自己服务器的 SSH。BSD。"),
+("Geosite and geoip data, downloaded when your rules ask for it.", "Данные geosite и geoip — скачиваются, когда их требуют правила.", "geosite 和 geoip 数据，在规则需要时下载。"),
 ]

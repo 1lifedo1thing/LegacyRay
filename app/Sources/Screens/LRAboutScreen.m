@@ -137,13 +137,16 @@
     };
     NSArray *base = [NSArray arrayWithObjects:
         credit(@"senko", L(@"by sqmrak: the daemon, the VLESS / Reality / XHTTP / gRPC stack, AmneziaWG, the routing engine. GPL-2.0.")),
-        credit(@"vless-core-app", L(@"by notfence: the feature set LegacyRay follows. No code is taken from it.")), nil];
+        credit(@"vless-core-app", L(@"by notfence: the feature set LegacyRay follows. No code is taken from it.")),
+        credit(@"Happ · Amnezia VPN", L(@"The routing profiles, split tunnelling and own-server setup follow their ideas. No code is taken from them.")), nil];
     NSArray *libs = [NSArray arrayWithObjects:
         credit(@"OpenSSL", L(@"TLS and cryptography for the daemon. Apache 2.0.")),
         credit(@"Mbed TLS", L(@"Modern TLS inside old apps (the TLS hook). Apache 2.0.")),
         credit(@"ZBar", L(@"QR code recognition. LGPL-2.1.")),
         credit(@"cJSON", L(@"JSON parsing. MIT.")),
         credit(@"fishhook", L(@"Symbol rebinding for the connect hook. BSD.")),
+        credit(@"libssh2", L(@"SSH for setting up your own server. BSD.")),
+        credit(@"v2fly domain-list-community · ipverse", L(@"Geosite and geoip data, downloaded when your rules ask for it.")),
         credit(@"Mozilla CA bundle", L(@"Root certificates for old systems. MPL 2.0.")), nil];
     return [NSArray arrayWithObjects:
             [LRSectionSpec header:L(@"Special thanks") rows:base footer:nil],
