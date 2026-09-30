@@ -22,7 +22,6 @@
     [_console release];
     [_stations release];
     [_logNav release];
-    [_cabinet release];
     [_consoleFrame release];
     [_logFrame release];
     [super dealloc];
@@ -31,22 +30,17 @@
 - (void)loadView {
     UIView *root = [[[UIView alloc] initWithFrame:[[UIScreen mainScreen] applicationFrame]] autorelease];
     root.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    /* the divider between the panes */
     root.backgroundColor = SKIN->flat ? SKIN->separator : [UIColor blackColor];
     self.view = root;
 }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    _cabinet = [[UIImageView alloc] initWithFrame:self.view.bounds];
-    [self.view addSubview:_cabinet];
     _logFrame = [[UIView alloc] init];
     _logFrame.clipsToBounds = YES;
     _consoleFrame = [[UIView alloc] init];
     _consoleFrame.clipsToBounds = YES;
-    if (!SKIN->flat) {
-        _consoleFrame.layer.cornerRadius = 4;
-        _logFrame.layer.cornerRadius = 4;
-    }
     [self.view addSubview:_logFrame];
     [self.view addSubview:_consoleFrame];
     if (_containment) {
@@ -64,39 +58,13 @@
     [self layoutPanes];
 }
 
-- (UIImage *)cabinetImage:(CGSize)size {
-    return LRImageWithSize(size, YES, ^(CGContextRef ctx, CGRect rect) {
-        if (SKIN->flat) {
-            [SKIN->separator setFill];
-            CGContextFillRect(ctx, rect);
-            return;
-        }
-        LRDrawWalnut(ctx, rect);
-    });
-}
-
 - (void)layoutPanes {
     CGRect b = self.view.bounds;
-    BOOL flat = SKIN->flat;
-    BOOL landscape = b.size.width > b.size.height;
-    if (!CGSizeEqualToSize(_cabinet.image.size, b.size)) _cabinet.image = [self cabinetImage:b.size];
-    _cabinet.frame = b;
-    CGFloat gap = flat ? 0.5f : 10;
-    CGFloat edge = flat ? 0 : 10;
-    /* ios 7 lays the status bar over the cabinet: the wood shows through it,
-       and the panes start below it. flat panes run under it with their headers */
-    CGFloat top = edge + (flat ? 0 : LRStatusBarOverlap(self.view));
-    if (landscape) {
-        CGFloat logW = roundf(MIN(390.0f, b.size.width * 0.39f));
-        _logFrame.frame = CGRectMake(edge, top, logW - edge, b.size.height - top - edge);
-        _consoleFrame.frame = CGRectMake(logW + gap, top, b.size.width - logW - gap - edge,
-                                         b.size.height - top - edge);
-    } else {
-        CGFloat consoleH = roundf(MIN(600.0f, b.size.height * 0.58f));
-        _consoleFrame.frame = CGRectMake(edge, top, b.size.width - edge * 2, consoleH - top);
-        _logFrame.frame = CGRectMake(edge, consoleH + gap, b.size.width - edge * 2,
-                                     b.size.height - consoleH - gap - edge);
-    }
+    CGFloat divider = SKIN->flat ? LRHairline() : 1;
+    /* the panes run to the top; on ios 7 their bars grow under the status bar */
+    CGFloat logW = 320;
+    _logFrame.frame = CGRectMake(0, 0, logW, b.size.height);
+    _consoleFrame.frame = CGRectMake(logW + divider, 0, b.size.width - logW - divider, b.size.height);
     _logNav.view.frame = _logFrame.bounds;
     _console.view.frame = _consoleFrame.bounds;
     [_console relayout];

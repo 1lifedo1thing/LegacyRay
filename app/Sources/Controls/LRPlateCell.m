@@ -3,7 +3,8 @@
 
 CGFloat LRPlateMargin(CGFloat width) {
     if (SKIN->flat) return 0;
-    return width >= 600 ? 40 : (width >= 480 ? 24 : 10);
+    /* the insets of ios 6 grouped tables: phone, form sheet, full ipad */
+    return width >= 700 ? 45 : (width >= 480 ? 30 : 10);
 }
 
 @implementation LRRow
@@ -118,59 +119,8 @@ CGFloat LRPlateMargin(CGFloat width) {
         [self drawFlat:ctx];
         return;
     }
-    LRSkin *s = SKIN;
     CGRect b = self.bounds;
-    CGRect plate = CGRectMake(margin, 0, b.size.width - margin * 2, b.size.height);
-    CGFloat r = 9;
-    BOOL roundTop = position == LRPlateSingle || position == LRPlateTop;
-    BOOL roundBottom = position == LRPlateSingle || position == LRPlateBottom;
-    if (roundBottom) plate.size.height -= 1;
-    CGMutablePathRef path = CGPathCreateMutable();
-    CGFloat minx = CGRectGetMinX(plate), maxx = CGRectGetMaxX(plate);
-    CGFloat miny = CGRectGetMinY(plate), maxy = CGRectGetMaxY(plate);
-    CGPathMoveToPoint(path, NULL, minx, miny + (roundTop ? r : 0));
-    if (roundTop) {
-        CGPathAddArcToPoint(path, NULL, minx, miny, minx + r, miny, r);
-        CGPathAddArcToPoint(path, NULL, maxx, miny, maxx, miny + r, r);
-    } else {
-        CGPathAddLineToPoint(path, NULL, minx, miny);
-        CGPathAddLineToPoint(path, NULL, maxx, miny);
-    }
-    if (roundBottom) {
-        CGPathAddArcToPoint(path, NULL, maxx, maxy, maxx - r, maxy, r);
-        CGPathAddArcToPoint(path, NULL, minx, maxy, minx, maxy - r, r);
-    } else {
-        CGPathAddLineToPoint(path, NULL, maxx, maxy);
-        CGPathAddLineToPoint(path, NULL, minx, maxy);
-    }
-    CGPathCloseSubpath(path);
-    /* the lip under the last plate */
-    if (roundBottom) {
-        CGContextSaveGState(ctx);
-        CGContextTranslateCTM(ctx, 0, 1);
-        CGContextAddPath(ctx, path);
-        CGContextSetRGBFillColor(ctx, 1, 1, 1, s->night ? 0.06f : 0.7f);
-        CGContextFillPath(ctx);
-        CGContextRestoreGState(ctx);
-    }
-    CGContextSaveGState(ctx);
-    CGContextAddPath(ctx, path);
-    CGContextClip(ctx);
-    if (pressed) LRFillVertical(ctx, plate, s->groupPressed, LRColorMix(s->groupPressed, s->groupBottom, 0.5f));
-    else LRFillVertical(ctx, plate, s->groupTop, s->groupBottom);
-    /* bevel: a light line on top of every row, a groove at the bottom */
-    CGContextSetRGBFillColor(ctx, 1, 1, 1, s->night ? 0.07f : 0.9f);
-    CGContextFillRect(ctx, CGRectMake(minx, miny + (roundTop ? 1 : 0), plate.size.width, 1));
-    if (!roundBottom) {
-        [s->groupLine setFill];
-        CGContextFillRect(ctx, CGRectMake(minx, maxy - 1, plate.size.width, 1));
-    }
-    CGContextRestoreGState(ctx);
-    CGContextAddPath(ctx, path);
-    [s->groupEdge setStroke];
-    CGContextSetLineWidth(ctx, 1);
-    CGContextStrokePath(ctx);
-    CGPathRelease(path);
+    LRDrawGroupCell(ctx, CGRectMake(margin, 0, b.size.width - margin * 2, b.size.height), position, pressed, NO);
 }
 @end
 
@@ -181,6 +131,7 @@ CGFloat LRPlateMargin(CGFloat width) {
 @public
     LRRow *row;
     CGRect inner;
+    BOOL lit;       /* the row is pressed: white on blue */
 }
 @end
 
@@ -204,22 +155,15 @@ CGFloat LRPlateMargin(CGFloat width) {
     CGContextRef ctx = UIGraphicsGetCurrentContext();
     LRSkin *s = SKIN;
     CGFloat midY = CGRectGetMidY(inner);
+    BOOL white = lit && !s->flat;
     if (row.chevron) {
-        UIColor *c = s->flat ? [UIColor colorWithWhite:0.78f alpha:1] : s->groupMuted;
-        LRDrawChevron(ctx, CGPointMake(CGRectGetMaxX(inner) - 3, midY), 4.5f, NO, c, s->flat ? 2 : 2.5f);
+        UIColor *c = white ? [UIColor whiteColor]
+            : (s->flat ? [UIColor colorWithWhite:0.78f alpha:1] : [UIColor colorWithWhite:0.55f alpha:1]);
+        LRDrawChevron(ctx, CGPointMake(CGRectGetMaxX(inner) - 3, midY), 4.5f, NO, c, s->flat ? 2 : 2.6f);
     }
-    if (row.kind == LRRowCheck && row.on) {
-        UIColor *c = s->flat ? s->tint : s->link;
-        [c setStroke];
-        CGContextSetLineWidth(ctx, 2.5f);
-        CGContextSetLineCap(ctx, kCGLineCapRound);
-        CGContextSetLineJoin(ctx, kCGLineJoinRound);
-        CGFloat x = CGRectGetMaxX(inner) - 14;
-        CGContextMoveToPoint(ctx, x, midY);
-        CGContextAddLineToPoint(ctx, x + 4.5f, midY + 5);
-        CGContextAddLineToPoint(ctx, x + 13, midY - 6);
-        CGContextStrokePath(ctx);
-    }
+    if (row.kind == LRRowCheck && row.on)
+        LRDrawCheckmark(ctx, CGPointMake(CGRectGetMaxX(inner) - 14, midY),
+                        white ? [UIColor whiteColor] : (s->flat ? s->tint : s->groupDetail));
     CGFloat iconY = [row.subtitle length] ? 8 : midY - 12;
     if ([row.flagCode length]) {
         LRDrawFlag(ctx, row.flagCode, CGRectMake(inner.origin.x, iconY + 1, 22, 22));
@@ -253,9 +197,8 @@ CGFloat LRPlateMargin(CGFloat width) {
             [self.contentView addSubview:l];
         }
         _detail.textAlignment = NSTextAlignmentRight;
-        LRCellDecor *decor = [[[LRCellDecor alloc] initWithFrame:self.bounds] autorelease];
-        decor.tag = 7001;
-        [self.contentView addSubview:decor];
+        _decor = [[LRCellDecor alloc] initWithFrame:self.bounds];
+        [self.contentView addSubview:_decor];
         _toggle = [[LRToggleSwitch alloc] initWithFrame:CGRectZero];
         [_toggle addTarget:self action:@selector(toggled:) forControlEvents:UIControlEventValueChanged];
         [self.contentView addSubview:_toggle];
@@ -264,6 +207,7 @@ CGFloat LRPlateMargin(CGFloat width) {
 }
 
 - (void)dealloc {
+    [_decor release];
     [_row release];
     [_title release];
     [_detail release];
@@ -278,27 +222,27 @@ CGFloat LRPlateMargin(CGFloat width) {
 }
 
 static UIFont *LRRowTitleFont(LRRow *row) {
-    if (row.kind == LRRowText) return [LRSkin bodyFont:14];
-    if (SKIN->flat) return row.kind == LRRowButton && row.style != LRRowStyleNormal
-        ? [LRSkin bodyFont:17] : [LRSkin bodyFont:17];
-    return [LRSkin boldFont:row.kind == LRRowButton ? 16 : 15];
+    if (row.kind == LRRowText) return [LRSkin bodyFont:SKIN->flat ? 14 : 15];
+    if (SKIN->flat) return [LRSkin bodyFont:17];
+    return [LRSkin boldFont:17];
 }
 
+/* a long value gives way to the title a little earlier on the phone */
 static UIFont *LRRowDetailFont(LRRow *row) {
     if (row.monospace) return [LRSkin monoFont:13];
-    return SKIN->flat ? [LRSkin bodyFont:17] : [LRSkin bodyFont:15];
+    return [LRSkin bodyFont:SKIN->flat ? 17 : 16];
 }
 
 + (CGFloat)heightForRow:(LRRow *)row width:(CGFloat)width margin:(CGFloat)margin {
-    CGFloat inner = width - margin * 2 - 30;
+    CGFloat inner = width - margin * 2 - (SKIN->flat ? 30 : 20);
     if (row.kind == LRRowText) {
         CGSize s = [row.title sizeWithFont:LRRowTitleFont(row) constrainedToSize:CGSizeMake(inner, 4000)
                              lineBreakMode:NSLineBreakByWordWrapping];
         return MAX(44.0f, ceilf(s.height) + 22);
     }
-    CGFloat h = SKIN->flat ? 44 : 46;
+    CGFloat h = 44;
     if ([row.subtitle length]) {
-        CGSize s = [row.subtitle sizeWithFont:[LRSkin bodyFont:12] constrainedToSize:CGSizeMake(inner, 400)
+        CGSize s = [row.subtitle sizeWithFont:[LRSkin bodyFont:SKIN->flat ? 12 : 13] constrainedToSize:CGSizeMake(inner, 400)
                                 lineBreakMode:NSLineBreakByWordWrapping];
         h = MAX(h, 32 + ceilf(s.height) + 8);
     }
@@ -321,28 +265,33 @@ static UIFont *LRRowDetailFont(LRRow *row) {
     _title.text = row.title;
     _title.font = LRRowTitleFont(row);
     _title.numberOfLines = row.kind == LRRowText ? 0 : 1;
+    /* a long title (russian runs long) gives up a few points before it is cut */
+    _title.adjustsFontSizeToFitWidth = row.kind != LRRowText;
+    _title.minimumFontSize = 13;
     _title.lineBreakMode = row.kind == LRRowText ? NSLineBreakByWordWrapping : NSLineBreakByTruncatingTail;
     UIColor *titleColor = s->groupInk;
-    if (row.style == LRRowStyleAccent) titleColor = s->flat ? s->tint : s->link;
+    if (row.style == LRRowStyleAccent) titleColor = s->flat ? s->tint : s->groupDetail;
     else if (row.style == LRRowStyleDestructive) titleColor = s->bad;
-    else if (row.style == LRRowStyleMuted || row.kind == LRRowText) titleColor = s->flat ? s->groupInk : s->groupMuted;
+    else if (row.style == LRRowStyleMuted) titleColor = s->groupMuted;
+    else if (row.kind == LRRowCheck && row.on && !s->flat) titleColor = s->groupDetail;
+    else if (row.kind == LRRowText && !s->flat) titleColor = s->groupHeader;
     if (!row.enabled) titleColor = LRColorAlpha(titleColor, 0.4f);
     _title.textColor = titleColor;
     _title.textAlignment = row.kind == LRRowButton ? NSTextAlignmentCenter : NSTextAlignmentLeft;
-    BOOL classicShadow = !s->flat;
-    _title.shadowColor = classicShadow ? (s->night ? [UIColor colorWithWhite:0 alpha:0.6f]
-                                                   : [UIColor colorWithWhite:1 alpha:0.9f]) : nil;
-    _title.shadowOffset = CGSizeMake(0, s->night ? -1 : 1);
+    _title.shadowColor = nil;
 
     _detail.text = row.detail;
     _detail.font = LRRowDetailFont(row);
-    _detail.textColor = row.detailColor ? row.detailColor
-        : (row.chevron && !s->flat ? s->link : s->groupMuted);
+    _detail.textColor = row.detailColor ? row.detailColor : (s->flat ? s->groupMuted : s->groupDetail);
     _detail.hidden = row.kind != LRRowValue || ![row.detail length];
 
     _subtitle.text = row.subtitle;
-    _subtitle.font = [LRSkin bodyFont:12];
+    _subtitle.font = [LRSkin bodyFont:s->flat ? 12 : 13];
     _subtitle.textColor = s->groupMuted;
+    UIColor *lit = s->flat ? nil : [UIColor whiteColor];
+    _title.highlightedTextColor = lit;
+    _detail.highlightedTextColor = lit;
+    _subtitle.highlightedTextColor = lit;
     _subtitle.numberOfLines = 0;
     _subtitle.hidden = ![row.subtitle length];
 
@@ -357,16 +306,40 @@ static UIFont *LRRowDetailFont(LRRow *row) {
     [self setNeedsDisplay];
 }
 
+/* the decorations turn white with the text while the row is pressed */
+- (void)setDecorLit:(BOOL)lit {
+    LRCellDecor *decor = (LRCellDecor *)_decor;
+    if (decor->lit == lit) return;
+    decor->lit = lit;
+    [decor setNeedsDisplay];
+}
+
+- (void)setHighlighted:(BOOL)highlighted animated:(BOOL)animated {
+    [super setHighlighted:highlighted animated:animated];
+    [self setDecorLit:highlighted || self.selected];
+}
+
+- (void)setSelected:(BOOL)selected animated:(BOOL)animated {
+    [super setSelected:selected animated:animated];
+    [self setDecorLit:selected || self.highlighted];
+}
+
+/* the text inset: 10 points inside an ios 6 row, 15 from an ios 7 edge */
+static CGFloat LRRowPad(void) {
+    return SKIN->flat ? 15 : 10;
+}
+
 - (CGRect)innerRect {
     CGRect b = self.bounds;
-    return CGRectMake(_margin + 15, 0, b.size.width - _margin * 2 - 30, b.size.height);
+    CGFloat pad = LRRowPad();
+    return CGRectMake(_margin + pad, 0, b.size.width - _margin * 2 - pad * 2, b.size.height);
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
     self.contentView.frame = self.bounds;
     CGRect in = [self innerRect];
-    LRCellDecor *decor = (LRCellDecor *)[self.contentView viewWithTag:7001];
+    LRCellDecor *decor = (LRCellDecor *)_decor;
     [decor->row release];
     decor->row = [_row retain];
     decor->inner = in;

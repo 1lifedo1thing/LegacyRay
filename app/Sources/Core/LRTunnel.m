@@ -330,11 +330,11 @@ static BOOL LRInterfaceBytes(NSString *name, uint64_t *inBytes, uint64_t *outByt
 
 - (NSString *)stateTitle {
     switch (_state) {
-        case LRTunnelOffline: return L(@"NO DAEMON");
-        case LRTunnelIdle: return L(@"STANDBY");
-        case LRTunnelConnecting: return L(@"TUNING...");
-        case LRTunnelConnected: return L(@"CONNECTED");
-        case LRTunnelError: return L(@"FAULT");
+        case LRTunnelOffline: return L(@"Service Stopped");
+        case LRTunnelIdle: return L(@"Not Connected");
+        case LRTunnelConnecting: return L(@"Connecting…");
+        case LRTunnelConnected: return L(@"Connected");
+        case LRTunnelError: return L(@"Connection Failed");
     }
     return @"";
 }

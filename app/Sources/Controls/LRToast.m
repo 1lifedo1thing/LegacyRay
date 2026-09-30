@@ -7,11 +7,11 @@ static LRToast *gCurrentToast = nil;
 
 - (id)initWithText:(NSString *)text tape:(UIColor *)tape width:(CGFloat)maxWidth {
     BOOL flat = SKIN->flat;
-    UIFont *font = flat ? [LRSkin bodyFont:14] : [LRSkin boldFont:13];
-    NSString *shown = flat ? text : [text uppercaseString];
+    UIFont *font = flat ? [LRSkin bodyFont:14] : [LRSkin boldFont:15];
+    NSString *shown = text;
     CGSize size = [shown sizeWithFont:font constrainedToSize:CGSizeMake(maxWidth - 40, 200)
                         lineBreakMode:NSLineBreakByWordWrapping];
-    CGRect frame = CGRectMake(0, 0, MIN(maxWidth, ceilf(size.width) + 40), ceilf(size.height) + 18);
+    CGRect frame = CGRectMake(0, 0, MIN(maxWidth, ceilf(size.width) + 40), ceilf(size.height) + (flat ? 18 : 22));
     if ((self = [super initWithFrame:frame])) {
         _text = [shown copy];
         _tape = [tape retain];
@@ -19,7 +19,7 @@ static LRToast *gCurrentToast = nil;
         self.opaque = NO;
         self.userInteractionEnabled = YES;
         self.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.layer.shadowOpacity = flat ? 0.15f : 0.5f;
+        self.layer.shadowOpacity = flat ? 0.15f : 0;
         self.layer.shadowOffset = CGSizeMake(0, 2);
         self.layer.shadowRadius = 3;
     }
@@ -48,36 +48,28 @@ static LRToast *gCurrentToast = nil;
         [self drawFlat:ctx];
         return;
     }
-    CGRect b = self.bounds;
-    /* tape with zig-zag cut ends */
-    CGFloat tooth = 3;
-    CGContextMoveToPoint(ctx, tooth, 0);
-    CGContextAddLineToPoint(ctx, b.size.width - tooth, 0);
-    for (CGFloat y = 0; y < b.size.height; y += tooth * 2) {
-        CGContextAddLineToPoint(ctx, b.size.width, MIN(b.size.height, y + tooth));
-        CGContextAddLineToPoint(ctx, b.size.width - tooth, MIN(b.size.height, y + tooth * 2));
-    }
-    CGContextAddLineToPoint(ctx, tooth, b.size.height);
-    for (CGFloat y = b.size.height; y > 0; y -= tooth * 2) {
-        CGContextAddLineToPoint(ctx, 0, MAX(0, y - tooth));
-        CGContextAddLineToPoint(ctx, tooth, MAX(0, y - tooth * 2));
-    }
-    CGContextClosePath(ctx);
+    /* the ios 6 hud: a dark translucent rounded panel with a white rim of
+       light, white bold text; errors and successes tint it */
+    CGRect b = CGRectInset(self.bounds, 0.5f, 0.5f);
+    LRAddRoundRect(ctx, b, 10);
+    [LRColorAlpha(LRColorMix(_tape, [UIColor blackColor], 0.35f), 0.82f) setFill];
+    CGContextFillPath(ctx);
     CGContextSaveGState(ctx);
+    LRAddRoundRect(ctx, b, 10);
     CGContextClip(ctx);
-    LRFillVertical(ctx, b, LRColorMix(_tape, [UIColor whiteColor], 0.18f),
-                   LRColorMix(_tape, [UIColor blackColor], 0.2f));
-    LRDrawNoise(ctx, b, 0.12f);
-    CGContextSetRGBFillColor(ctx, 1, 1, 1, 0.18f);
-    CGContextFillRect(ctx, CGRectMake(0, 1, b.size.width, b.size.height * 0.35f));
+    LRFillVertical(ctx, CGRectMake(b.origin.x, b.origin.y, b.size.width, b.size.height / 2),
+                   [UIColor colorWithWhite:1 alpha:0.14f], [UIColor colorWithWhite:1 alpha:0.03f]);
     CGContextRestoreGState(ctx);
-    /* raised letters: dark below, light above, white face */
-    UIFont *font = [LRSkin boldFont:13];
-    CGRect tr = CGRectInset(b, 20, 9);
-    [[UIColor colorWithWhite:0 alpha:0.45f] set];
-    [_text drawInRect:CGRectOffset(tr, 0, 1) withFont:font lineBreakMode:NSLineBreakByWordWrapping
+    LRAddRoundRect(ctx, b, 10);
+    CGContextSetRGBStrokeColor(ctx, 1, 1, 1, 0.25f);
+    CGContextSetLineWidth(ctx, 1);
+    CGContextStrokePath(ctx);
+    UIFont *font = [LRSkin boldFont:15];
+    CGRect tr = CGRectInset(self.bounds, 20, 11);
+    [[UIColor colorWithWhite:0 alpha:0.6f] set];
+    [_text drawInRect:CGRectOffset(tr, 0, -1) withFont:font lineBreakMode:NSLineBreakByWordWrapping
             alignment:NSTextAlignmentCenter];
-    [[UIColor colorWithWhite:0.93f alpha:1] set];
+    [[UIColor whiteColor] set];
     [_text drawInRect:tr withFont:font lineBreakMode:NSLineBreakByWordWrapping
             alignment:NSTextAlignmentCenter];
 }
@@ -100,7 +92,6 @@ static LRToast *gCurrentToast = nil;
     toast.frame = CGRectMake(x, -toast.bounds.size.height - 8, toast.bounds.size.width,
                              toast.bounds.size.height);
     toast.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
-    if (!SKIN->flat) toast.transform = CGAffineTransformMakeRotation(-0.012f);
     [host addSubview:toast];
     gCurrentToast = toast;
     LRAnimateIn(0.28, ^{

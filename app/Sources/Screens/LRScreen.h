@@ -1,19 +1,19 @@
-/* the base of every screen: a background finish, the engraved header bar and
-   a content area under it. screens live in a UINavigationController whose own
-   bar stays hidden, so push and pop keep the native animation */
+/* the base of every screen: a background, the header bar and a content area
+   under it. screens live in a UINavigationController whose own bar stays
+   hidden, so push and pop keep the native animation */
 #import <UIKit/UIKit.h>
 #import "LRHeaderBar.h"
 
 typedef enum {
-    LRBackgroundLinen = 0,   /* settings */
-    LRBackgroundLeather,     /* the station log */
-    LRBackgroundPlate        /* the faceplate */
+    LRBackgroundGrouped = 0,  /* the ios 6 pinstripes (flat: ios 7 grey) */
+    LRBackgroundDenim         /* the main screen (flat: near white) */
 } LRBackgroundStyle;
 
 @interface LRScreen : UIViewController {
     LRHeaderBar *_header;
     UIView *_contentView;
     UIImageView *_backdrop;
+    UIImageView *_vignette;
     LRBackgroundStyle _backgroundStyle;
     BOOL _hidesHeader;
     BOOL _manualLeftButton;
@@ -31,6 +31,9 @@ typedef enum {
    inset their content by headerCoverage. subclasses with a scroll view say yes */
 - (BOOL)wantsContentUnderHeader;
 @property (nonatomic, readonly) CGFloat headerCoverage;
+
+/* the denim is lit from here, in view coordinates (default: 40% down) */
+- (CGFloat)backdropFocus;
 
 /* back, or done when this is the root of a modal */
 - (void)close;

@@ -2,8 +2,19 @@
 #import "LRDraw.h"
 #import "LRSound.h"
 
+/* between the cap and the frame: the well (9) and the stitched ring (17) */
+#define LR_POWER_MARGIN 19.0f
+
 @implementation LRPowerButton
 @synthesize powerState = _powerState;
+
++ (CGFloat)radiusForSide:(CGFloat)side {
+    return SKIN->flat ? side / 2 - 12 : side / 2 - LR_POWER_MARGIN;
+}
+
++ (CGFloat)sideForRadius:(CGFloat)radius {
+    return SKIN->flat ? radius * 2 + 24 : radius * 2 + LR_POWER_MARGIN * 2;
+}
 
 static UIColor *LRPowerColor(LRPowerState s) {
     switch (s) {
@@ -12,107 +23,89 @@ static UIColor *LRPowerColor(LRPowerState s) {
         case LRPowerFault: return SKIN->ledRed;
         case LRPowerOff: break;
     }
-    return [UIColor colorWithRed:0.88f green:0.27f blue:0.18f alpha:1];
+    return SKIN->flat ? [UIColor colorWithWhite:0.55f alpha:1] : [UIColor colorWithRed:0.635f green:0.647f blue:0.663f alpha:1];
 }
 
 - (CGFloat)radius {
-    return MIN(self.bounds.size.width, self.bounds.size.height) / 2 - 12;
+    return [LRPowerButton radiusForSide:MIN(self.bounds.size.width, self.bounds.size.height)];
 }
 
-/* seat + dark gap drawn in drawRect; skirt and cap are images so pressing only
-   moves a layer */
-- (UIImage *)skirtImage:(CGFloat)R {
-    return LRImageWithSize(CGSizeMake(R * 2 + 2, R * 2 + 2), NO, ^(CGContextRef ctx, CGRect rect) {
-        CGPoint c = CGPointMake(R + 1, R + 1);
-        CGRect disc = CGRectMake(1, 1, R * 2, R * 2);
+static void LRAddPowerGlyph(CGContextRef ctx, CGPoint c, CGFloat gr) {
+    CGContextAddArc(ctx, c.x, c.y, gr, (CGFloat)-M_PI_2 + 0.72f, (CGFloat)-M_PI_2 - 0.72f + (CGFloat)M_PI * 2, 0);
+    CGContextMoveToPoint(ctx, c.x, c.y - gr * 1.22f);
+    CGContextAddLineToPoint(ctx, c.x, c.y - gr * 0.28f);
+}
+
+#pragma mark classic
+
+/* the pearl: matte white cloth over a dome, the icon's twill just visible */
+- (UIImage *)capImage:(CGFloat)R pressed:(BOOL)pressed {
+    return LRImageWithSize(CGSizeMake(R * 2, R * 2), NO, ^(CGContextRef ctx, CGRect rect) {
+        CGPoint c = CGPointMake(R, R);
         CGContextSaveGState(ctx);
-        CGContextAddEllipseInRect(ctx, disc);
+        CGContextAddEllipseInRect(ctx, rect);
         CGContextClip(ctx);
-        CGFloat locs[3] = { 0, 0.5f, 1 };
-        LRFillLinear(ctx, CGPointMake(0, 1), CGPointMake(0, R * 2 + 1),
-                     [NSArray arrayWithObjects:[UIColor colorWithWhite:0.94f alpha:1],
-                      [UIColor colorWithWhite:0.60f alpha:1], [UIColor colorWithWhite:0.87f alpha:1], nil], locs);
-        /* knurling */
-        CGContextSetLineWidth(ctx, 1.1f);
-        for (int k = 0; k < 120; k += 2) {
-            CGFloat a = (CGFloat)M_PI * 2 * k / 120;
-            CGContextMoveToPoint(ctx, c.x + cosf(a) * R * 0.80f, c.y + sinf(a) * R * 0.80f);
-            CGContextAddLineToPoint(ctx, c.x + cosf(a) * R, c.y + sinf(a) * R);
+        if (pressed)
+            LRFillVertical(ctx, rect, [UIColor colorWithRed:0.894f green:0.894f blue:0.886f alpha:1],
+                           [UIColor colorWithRed:0.769f green:0.773f blue:0.761f alpha:1]);
+        else
+            LRFillVertical(ctx, rect, [UIColor colorWithRed:0.984f green:0.984f blue:0.980f alpha:1],
+                           [UIColor colorWithRed:0.831f green:0.835f blue:0.824f alpha:1]);
+        UIImage *tile = LRDenimTile();
+        if (tile) {
+            CGContextSaveGState(ctx);
+            CGContextSetBlendMode(ctx, kCGBlendModeMultiply);
+            CGContextSetAlpha(ctx, 0.035f);
+            [[UIColor colorWithPatternImage:tile] setFill];
+            CGContextFillRect(ctx, rect);
+            CGContextRestoreGState(ctx);
         }
-        CGContextSetRGBStrokeColor(ctx, 0, 0, 0, 0.13f);
-        CGContextStrokePath(ctx);
+        LRFillRadial(ctx, CGPointMake(c.x - R * 0.25f, c.y - R * 0.55f), 0, R * 1.2f,
+                     [UIColor colorWithWhite:1 alpha:pressed ? 0.3f : 0.55f], [UIColor colorWithWhite:1 alpha:0]);
         CGContextRestoreGState(ctx);
         CGContextSetRGBStrokeColor(ctx, 0, 0, 0, 0.55f);
         CGContextSetLineWidth(ctx, 1);
-        CGContextStrokeEllipseInRect(ctx, CGRectInset(disc, 0.5f, 0.5f));
+        CGContextStrokeEllipseInRect(ctx, CGRectInset(rect, 0.5f, 0.5f));
+        CGContextSetRGBStrokeColor(ctx, 1, 1, 1, pressed ? 0.5f : 0.9f);
+        CGContextAddArc(ctx, c.x, c.y, R - 1.5f, (CGFloat)M_PI * 1.1f, (CGFloat)M_PI * 1.9f, 0);
+        CGContextStrokePath(ctx);
     });
 }
 
-- (UIImage *)capImage:(CGFloat)R pressed:(BOOL)pressed color:(UIColor *)glow lit:(BOOL)lit {
-    CGFloat rc = R * 0.78f;
-    return LRImageWithSize(CGSizeMake(rc * 2 + 2, rc * 2 + 2), NO, ^(CGContextRef ctx, CGRect rect) {
-        CGPoint c = CGPointMake(rc + 1, rc + 1);
-        CGRect disc = CGRectMake(1, 1, rc * 2, rc * 2);
+/* the glyph pressed into the cloth; lit from behind when the tunnel is up */
+- (UIImage *)glyphImage:(CGFloat)R state:(LRPowerState)state {
+    CGFloat gr = R * 0.34f, lw = MAX(2.0f, R * 0.085f);
+    CGFloat side = ceilf(gr * 2.6f + lw + 14);
+    UIColor *ink = LRPowerColor(state);
+    BOOL lit = state != LRPowerOff;
+    return LRImageWithSize(CGSizeMake(side, side), NO, ^(CGContextRef ctx, CGRect rect) {
+        CGPoint c = CGPointMake(side / 2, side / 2 + gr * 0.1f);
+        CGContextSetLineCap(ctx, kCGLineCapRound);
+        CGContextSetLineWidth(ctx, lw);
+        /* the light catches the lower edge of the groove */
+        LRAddPowerGlyph(ctx, CGPointMake(c.x, c.y + 1), gr);
+        CGContextSetRGBStrokeColor(ctx, 1, 1, 1, 0.95f);
+        CGContextStrokePath(ctx);
+        LRAddPowerGlyph(ctx, CGPointMake(c.x, c.y - 0.6f), gr);
+        CGContextSetRGBStrokeColor(ctx, 0, 0, 0, 0.18f);
+        CGContextStrokePath(ctx);
         CGContextSaveGState(ctx);
-        CGContextAddEllipseInRect(ctx, disc);
-        CGContextClip(ctx);
-        if (pressed)
-            LRFillVertical(ctx, disc, [UIColor colorWithWhite:0.70f alpha:1], [UIColor colorWithWhite:0.86f alpha:1]);
-        else
-            LRFillVertical(ctx, disc, [UIColor colorWithWhite:0.975f alpha:1], [UIColor colorWithWhite:0.73f alpha:1]);
-        /* concentric machining */
-        unsigned seed = 5;
-        CGContextSetLineWidth(ctx, 0.7f);
-        for (CGFloat r = 2; r < rc; ) {
-            seed = seed * 1103515245u + 12345u;
-            BOOL light = (seed >> 16) & 1;
-            CGContextSetRGBStrokeColor(ctx, light, light, light, light ? 0.10f : 0.05f);
-            CGContextStrokeEllipseInRect(ctx, CGRectMake(c.x - r, c.y - r, r * 2, r * 2));
-            r += 1.2f + ((seed >> 8) & 0xff) / 255.0f;
-        }
-        /* anisotropic highlight: two bright wedges */
-        CGFloat starts[2] = { -0.95f, (CGFloat)M_PI - 0.95f };
-        for (int i = 0; i < 2; ++i) {
-            CGContextMoveToPoint(ctx, c.x, c.y);
-            CGContextAddArc(ctx, c.x, c.y, rc, starts[i], starts[i] + 0.5f, 0);
-            CGContextClosePath(ctx);
-            CGContextSetRGBFillColor(ctx, 1, 1, 1, pressed ? 0.12f : 0.30f);
-            CGContextFillPath(ctx);
-        }
+        if (lit) CGContextSetShadowWithColor(ctx, CGSizeZero, 5, LRColorAlpha(ink, 0.6f).CGColor);
+        LRAddPowerGlyph(ctx, c, gr);
+        [ink setStroke];
+        CGContextStrokePath(ctx);
         CGContextRestoreGState(ctx);
-        CGContextSetRGBStrokeColor(ctx, 0, 0, 0, 0.35f);
-        CGContextSetLineWidth(ctx, 1);
-        CGContextStrokeEllipseInRect(ctx, CGRectInset(disc, 0.5f, 0.5f));
-        /* engraved power glyph, lit from behind when on */
-        CGFloat gr = rc * 0.42f;
-        UIColor *ink = lit ? LRColorMix(glow, [UIColor whiteColor], 0.15f)
-                           : [UIColor colorWithWhite:0.32f alpha:1];
-        for (int pass = 0; pass < 2; ++pass) {
-            CGFloat dy = pass == 0 ? 1 : 0;
-            CGContextSaveGState(ctx);
-            if (pass == 0) CGContextSetRGBStrokeColor(ctx, 1, 1, 1, 0.8f);
-            else {
-                [ink setStroke];
-                if (lit) CGContextSetShadowWithColor(ctx, CGSizeZero, 6, glow.CGColor);
-            }
-            CGContextSetLineCap(ctx, kCGLineCapRound);
-            CGContextSetLineWidth(ctx, rc * 0.11f);
-            CGContextAddArc(ctx, c.x, c.y + dy, gr, (CGFloat)-M_PI_2 + 0.75f,
-                            (CGFloat)-M_PI_2 - 0.75f + (CGFloat)M_PI * 2, 0);
-            CGContextStrokePath(ctx);
-            CGContextMoveToPoint(ctx, c.x, c.y + dy - gr * 1.18f);
-            CGContextAddLineToPoint(ctx, c.x, c.y + dy - gr * 0.25f);
-            CGContextStrokePath(ctx);
-            CGContextRestoreGState(ctx);
-        }
     });
 }
 
-/* flat: a disc inside a thin ring. green and filled when on, the ring alone
+#pragma mark flat
+
+/* a disc inside a thin ring: green and filled when on, the ring alone
    (pulsing amber) while tuning, white with a grey ring on standby */
 - (UIImage *)flatCapImage:(CGFloat)R pressed:(BOOL)pressed color:(UIColor *)color {
     CGFloat rc = R - 7;
     BOOL filled = _powerState == LRPowerOn;
+    LRPowerState state = _powerState;
     return LRImageWithSize(CGSizeMake(rc * 2 + 2, rc * 2 + 2), NO, ^(CGContextRef ctx, CGRect rect) {
         CGPoint c = CGPointMake(rc + 1, rc + 1);
         CGRect disc = CGRectMake(1, 1, rc * 2, rc * 2);
@@ -125,70 +118,59 @@ static UIColor *LRPowerColor(LRPowerState s) {
             CGContextSetLineWidth(ctx, 1);
             CGContextStrokeEllipseInRect(ctx, CGRectInset(disc, 0.5f, 0.5f));
         }
-        UIColor *ink = filled ? [UIColor whiteColor]
-            : (_powerState == LRPowerOff ? [UIColor colorWithWhite:0.55f alpha:1] : color);
-        CGFloat gr = rc * 0.36f;
+        UIColor *ink = filled ? [UIColor whiteColor] : (state == LRPowerOff ? [UIColor colorWithWhite:0.55f alpha:1] : color);
         [ink setStroke];
         CGContextSetLineCap(ctx, kCGLineCapRound);
         CGContextSetLineWidth(ctx, MAX(2.0f, rc * 0.07f));
-        CGContextAddArc(ctx, c.x, c.y, gr, (CGFloat)-M_PI_2 + 0.75f,
-                        (CGFloat)-M_PI_2 - 0.75f + (CGFloat)M_PI * 2, 0);
-        CGContextStrokePath(ctx);
-        CGContextMoveToPoint(ctx, c.x, c.y - gr * 1.18f);
-        CGContextAddLineToPoint(ctx, c.x, c.y - gr * 0.25f);
+        LRAddPowerGlyph(ctx, c, rc * 0.36f);
         CGContextStrokePath(ctx);
     });
 }
+
+#pragma mark control
 
 - (id)initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:frame])) {
         self.backgroundColor = [UIColor clearColor];
         self.contentMode = UIViewContentModeRedraw;
-        _ring = [[CAShapeLayer layer] retain];
-        _ring.fillColor = [UIColor clearColor].CGColor;
-        _ring.shadowOffset = CGSizeZero;
-        _ring.shadowOpacity = 1;
-        _ring.shadowRadius = 9;
-        [self.layer addSublayer:_ring];
-        _skirt = [[UIImageView alloc] init];
+        if (SKIN->flat) {
+            _ring = [[CAShapeLayer layer] retain];
+            _ring.fillColor = [UIColor clearColor].CGColor;
+            [self.layer addSublayer:_ring];
+        }
         _cap = [[UIImageView alloc] init];
-        _skirt.userInteractionEnabled = NO;
         _cap.userInteractionEnabled = NO;
-        [self addSubview:_skirt];
         [self addSubview:_cap];
-        [self rebuild];
+        _glyph = [[UIImageView alloc] init];
+        _glyph.userInteractionEnabled = NO;
+        _glyph.hidden = SKIN->flat;
+        [self addSubview:_glyph];
     }
     return self;
 }
 
 - (void)dealloc {
     [_ring release];
-    [_skirt release];
     [_cap release];
+    [_glyph release];
     [super dealloc];
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    [self rebuild];
-}
-
-- (void)rebuild {
     CGFloat R = [self radius];
-    if (R < 10) return;
-    CGPoint c = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
-    CGFloat ringR = SKIN->flat ? R - 1.5f : R + 4.5f;
-    CGMutablePathRef p = CGPathCreateMutable();
-    CGPathAddEllipseInRect(p, NULL, CGRectMake(c.x - ringR, c.y - ringR, ringR * 2, ringR * 2));
-    _ring.path = p;
-    _ring.frame = self.bounds;
-    _ring.lineWidth = SKIN->flat ? 3.0f : R * 0.10f;
-    _skirt.hidden = SKIN->flat;
-    /* no shadowPath: CGPathCreateCopyByStrokingPath is ios 5+, and one layer
-       rendering its own shadow is cheap enough */
-    CGPathRelease(p);
-    _skirt.image = [self skirtImage:R];
-    _skirt.frame = CGRectMake(c.x - R - 1, c.y - R - 1, R * 2 + 2, R * 2 + 2);
+    if (R < 10 || R == _builtFor) return;
+    _builtFor = R;
+    if (_ring) {
+        CGPoint c = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
+        CGFloat ringR = R - 1.5f;
+        CGMutablePathRef p = CGPathCreateMutable();
+        CGPathAddEllipseInRect(p, NULL, CGRectMake(c.x - ringR, c.y - ringR, ringR * 2, ringR * 2));
+        _ring.path = p;
+        CGPathRelease(p);
+        _ring.frame = self.bounds;
+        _ring.lineWidth = 3;
+    }
     [self applyState];
     [self setNeedsDisplay];
 }
@@ -197,39 +179,39 @@ static UIColor *LRPowerColor(LRPowerState s) {
     CGFloat R = [self radius];
     if (R < 10) return;
     UIColor *color = LRPowerColor(_powerState);
-    BOOL lit = _powerState != LRPowerOff;
     CGPoint c = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
-    CGFloat rc = R * 0.78f;
     BOOL pressed = self.highlighted;
-    BOOL flat = SKIN->flat;
-    if (flat) {
-        rc = R - 7;
+    CALayer *pulsing;
+    if (SKIN->flat) {
+        CGFloat rc = R - 7;
         _cap.image = [self flatCapImage:R pressed:pressed color:color];
         _cap.frame = CGRectMake(c.x - rc - 1, c.y - rc - 1, rc * 2 + 2, rc * 2 + 2);
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        _ring.strokeColor = (_powerState != LRPowerOff ? color : [UIColor colorWithWhite:0.80f alpha:1]).CGColor;
+        [CATransaction commit];
+        pulsing = _ring;
     } else {
-        _cap.image = [self capImage:R pressed:pressed color:color lit:lit];
-        _cap.frame = CGRectMake(c.x - rc - 1, c.y - rc - 1 + (pressed ? 1.5f : 0), rc * 2 + 2, rc * 2 + 2);
+        CGFloat dy = pressed ? 1 : 0;
+        _cap.image = [self capImage:R pressed:pressed];
+        _cap.frame = CGRectMake(c.x - R, c.y - R + dy, R * 2, R * 2);
+        UIImage *g = [self glyphImage:R state:_powerState];
+        _glyph.image = g;
+        _glyph.frame = CGRectMake(roundf(c.x - g.size.width / 2), roundf(c.y - g.size.height / 2) + dy,
+                                  g.size.width, g.size.height);
+        pulsing = _glyph.layer;
     }
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    if (flat) {
-        _ring.strokeColor = (lit ? color : [UIColor colorWithWhite:0.80f alpha:1]).CGColor;
-        _ring.shadowOpacity = 0;
-    } else {
-        _ring.strokeColor = (lit ? color : LRColorMix(color, [UIColor blackColor], 0.72f)).CGColor;
-        _ring.shadowColor = color.CGColor;
-        _ring.shadowOpacity = lit ? 1.0f : 0.0f;
-    }
-    [CATransaction commit];
-    [_ring removeAnimationForKey:@"pulse"];
+    /* the one animation on the main screen, and only while connecting */
+    [pulsing removeAnimationForKey:@"pulse"];
     if (_powerState == LRPowerTuning) {
         CABasicAnimation *a = [CABasicAnimation animationWithKeyPath:@"opacity"];
         a.fromValue = [NSNumber numberWithFloat:1];
-        a.toValue = [NSNumber numberWithFloat:0.3f];
-        a.duration = 0.55;
+        a.toValue = [NSNumber numberWithFloat:0.35f];
+        a.duration = 0.8;
         a.autoreverses = YES;
         a.repeatCount = HUGE_VALF;
-        [_ring addAnimation:a forKey:@"pulse"];
+        a.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+        [pulsing addAnimation:a forKey:@"pulse"];
     }
 }
 
@@ -248,33 +230,38 @@ static UIColor *LRPowerColor(LRPowerState s) {
     }
 }
 
+/* the stitched ring, the well and the cap's shadow in it: drawn once */
 - (void)drawRect:(CGRect)rect {
     if (SKIN->flat) return;
     CGContextRef ctx = UIGraphicsGetCurrentContext();
     CGFloat R = [self radius];
     CGPoint c = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
-    /* soft shadow the knob casts on the plate */
+    LRDrawStitchCircle(ctx, c, R + 17);
+    CGFloat well = R + 9;
+    CGRect wellRect = CGRectMake(c.x - well, c.y - well, well * 2, well * 2);
+    CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.42f);
+    CGContextFillEllipseInRect(ctx, wellRect);
     CGContextSaveGState(ctx);
-    CGContextSetShadowWithColor(ctx, CGSizeMake(0, 3), 8, [UIColor colorWithWhite:0 alpha:0.5f].CGColor);
-    CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.3f);
-    CGContextFillEllipseInRect(ctx, CGRectMake(c.x - R - 7, c.y - R - 7, (R + 7) * 2, (R + 7) * 2));
-    CGContextRestoreGState(ctx);
-    /* recessed seat: dark above, light lip below */
-    CGRect seat = CGRectMake(c.x - R - 7, c.y - R - 7, (R + 7) * 2, (R + 7) * 2);
-    CGContextSaveGState(ctx);
-    CGContextAddEllipseInRect(ctx, seat);
+    CGContextAddEllipseInRect(ctx, wellRect);
     CGContextClip(ctx);
-    LRFillVertical(ctx, seat, [UIColor colorWithWhite:0 alpha:0.5f],
-                   [UIColor colorWithWhite:1 alpha:SKIN->night ? 0.15f : 0.5f]);
+    LRFillVertical(ctx, CGRectMake(wellRect.origin.x, wellRect.origin.y, wellRect.size.width, 14),
+                   [UIColor colorWithWhite:0 alpha:0.5f], [UIColor colorWithWhite:0 alpha:0]);
     CGContextRestoreGState(ctx);
-    CGContextSetRGBFillColor(ctx, 0.07f, 0.07f, 0.08f, 1);
-    CGContextFillEllipseInRect(ctx, CGRectInset(seat, 1.5f, 1.5f));
+    CGContextSetRGBStrokeColor(ctx, 1, 1, 1, 0.10f);
+    CGContextSetLineWidth(ctx, 1);
+    CGContextAddArc(ctx, c.x, c.y + 0.5f, well, (CGFloat)M_PI * 0.15f, (CGFloat)M_PI * 0.85f, 0);
+    CGContextStrokePath(ctx);
+    for (int i = 0; i < 7; ++i) {
+        CGFloat r = R + 3.5f - i * 0.6f;
+        CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.08f);
+        CGContextFillEllipseInRect(ctx, CGRectMake(c.x - r, c.y + 3 - r, r * 2, r * 2));
+    }
 }
 
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     CGPoint c = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
     CGFloat dx = point.x - c.x, dy = point.y - c.y;
-    CGFloat r = [self radius] + 10;
+    CGFloat r = [self radius] + 12;
     return dx * dx + dy * dy <= r * r;
 }
 @end

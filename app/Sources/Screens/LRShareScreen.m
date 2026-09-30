@@ -34,7 +34,7 @@
         CGContextStrokePath(ctx);
         return;
     }
-    LRDrawPaperCard(ctx, CGRectInset(b, 3, 3), 8);
+    LRDrawGroupCell(ctx, b, LRPlateSingle, NO, NO);
 }
 @end
 
@@ -45,7 +45,7 @@
     if ((self = [super init])) {
         self.title = title;
         _payload = [payload copy];
-        _backgroundStyle = LRBackgroundLeather;
+        _backgroundStyle = LRBackgroundGrouped;
     }
     return self;
 }
@@ -89,14 +89,18 @@
     [_qr addGestureRecognizer:[[[UITapGestureRecognizer alloc] initWithTarget:self
                                                                        action:@selector(reveal)] autorelease]];
     [_card addSubview:_qr];
-    UIColor *ink = s->flat ? [UIColor colorWithWhite:0.1f alpha:1] : s->cardInk;
-    _nameLabel = [self label:s->flat ? [LRSkin boldFont:17] : [LRSkin titleFont:18] color:ink lines:1];
+    UIColor *ink = s->groupInk;
+    _nameLabel = [self label:[LRSkin boldFont:s->flat ? 17 : 18] color:ink lines:1];
     _nameLabel.text = self.title;
     [_card addSubview:_nameLabel];
-    _textLabel = [self label:[LRSkin monoFont:11] color:s->flat ? s->groupMuted : s->cardMuted lines:3];
+    _textLabel = [self label:[LRSkin monoFont:11] color:s->groupMuted lines:3];
     _textLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
     [_card addSubview:_textLabel];
-    _note = [self label:[LRSkin bodyFont:13] color:s->flat ? s->groupMuted : LRColorAlpha(s->stitch, 0.9f) lines:0];
+    _note = [self label:[LRSkin bodyFont:s->flat ? 13 : 15] color:s->flat ? s->groupMuted : s->groupHeader lines:0];
+    if (!s->flat) {
+        _note.shadowColor = s->groupHeaderShadow;
+        _note.shadowOffset = CGSizeMake(0, 1);
+    }
     [self.contentView addSubview:_note];
 
     _copyButton = [[LRButton buttonWithStyle:LRButtonMetal title:L(@"Copy") action:^(LRButton *b) {
@@ -135,8 +139,7 @@
     int version = LRQRVersionForText(_payload);
     if (!_revealed) {
         _qr.image = nil;
-        _qr.backgroundColor = SKIN->flat ? [UIColor colorWithWhite:0.93f alpha:1]
-                                         : [UIColor colorWithWhite:0.5f alpha:0.18f];
+        _qr.backgroundColor = [UIColor colorWithWhite:0.93f alpha:1];
         _qr.layer.cornerRadius = 6;
     } else {
         _qr.backgroundColor = [UIColor clearColor];

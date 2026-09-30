@@ -20,7 +20,8 @@ static BOOL LRBool(NSString *key, BOOL fallback) {
 
 + (LRThemeSetting)theme {
     NSInteger v = [D() integerForKey:@"LRTheme"];
-    return (v >= LRThemeAuto && v <= LRThemeClassicAuto) ? (LRThemeSetting)v : LRThemeAuto;
+    if (v == LRThemeOldNight || v == LRThemeOldTimed) return LRThemeClassic;
+    return (v == LRThemeClassic || v == LRThemeFlat) ? (LRThemeSetting)v : LRThemeAuto;
 }
 
 + (BOOL)systemIsFlat {
@@ -39,16 +40,6 @@ static BOOL LRBool(NSString *key, BOOL fallback) {
 + (void)setTheme:(LRThemeSetting)theme {
     [D() setInteger:theme forKey:@"LRTheme"];
     LRChanged();
-}
-
-+ (BOOL)nightSkinActive {
-    LRThemeSetting t = [self theme];
-    if (t == LRThemeDay || t == LRThemeFlat) return NO;
-    if (t == LRThemeNight) return YES;
-    if (t == LRThemeAuto && [self systemIsFlat]) return NO;
-    NSDateComponents *c = [[NSCalendar currentCalendar] components:NSHourCalendarUnit
-                                                          fromDate:[NSDate date]];
-    return [c hour] < 7 || [c hour] >= 20;
 }
 
 + (BOOL)stealthMode { return LRBool(@"LRStealth", NO); }

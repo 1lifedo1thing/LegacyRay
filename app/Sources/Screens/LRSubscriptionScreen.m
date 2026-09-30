@@ -32,7 +32,7 @@
             l.font = [LRSkin boldFont:14];
             l.textColor = s->groupHeader;
             l.shadowColor = s->flat ? nil : s->groupHeaderShadow;
-            l.shadowOffset = CGSizeMake(0, s->night ? -1 : 1);
+            l.shadowOffset = CGSizeMake(0, 1);
             [self addSubview:l];
         }
         left.textAlignment = NSTextAlignmentRight;
@@ -48,10 +48,10 @@
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect b = self.bounds;
-    CGFloat m = LRPlateMargin(b.size.width) + 15;
+    CGFloat m = LRPlateMargin(b.size.width) + (SKIN->flat ? 15 : 10);
     used.frame = CGRectMake(m, 14, (b.size.width - m * 2) * 0.6f, 18);
     left.frame = CGRectMake(b.size.width / 2, 14, b.size.width / 2 - m, 18);
-    gauge.frame = CGRectMake(m, 38, b.size.width - m * 2, SKIN->flat ? 8 : 18);
+    gauge.frame = CGRectMake(m, 38, b.size.width - m * 2, SKIN->flat ? 8 : 12);
 }
 @end
 

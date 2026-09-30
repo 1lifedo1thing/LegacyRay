@@ -1,8 +1,9 @@
-/* grouped table rows. classic: engraved plates with rounded ends, a light
-   bevel and pressed state; flat: white rows with ios 7 hairlines. the row
-   content is described by LRRow so screens stay declarative */
+/* grouped table rows. classic: the ios 6 grouped row (white, grey rim,
+   blue when pressed); flat: white rows with ios 7 hairlines. the row content
+   is described by LRRow so screens stay declarative */
 #import <UIKit/UIKit.h>
 #import "LRToggleSwitch.h"
+#import "LRDraw.h"
 
 typedef enum {
     LRRowValue = 0,     /* title + detail, chevron when it has an action */
@@ -18,13 +19,6 @@ typedef enum {
     LRRowStyleDestructive,
     LRRowStyleMuted
 } LRRowStyle;
-
-typedef enum {
-    LRPlateSingle = 0,
-    LRPlateTop,
-    LRPlateMiddle,
-    LRPlateBottom
-} LRPlatePosition;
 
 @interface LRRow : NSObject {
     LRRowKind _kind;
@@ -78,6 +72,7 @@ typedef enum {
     LRToggleSwitch *_toggle;
     UIView *_plate;
     UIView *_pressedPlate;
+    UIView *_decor;
 }
 @property (nonatomic, readonly) LRRow *row;
 @property (nonatomic, readonly) LRToggleSwitch *toggle;

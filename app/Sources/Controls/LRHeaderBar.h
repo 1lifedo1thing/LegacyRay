@@ -1,6 +1,6 @@
-/* the header of every screen: a strip of the faceplate with the title
-   engraved into it and hardware buttons at the ends. replaces the navigation
-   bar so the look is the same from ios 4 to ios 7 */
+/* the header of every screen: a denim navigation bar with a copper seam and
+   ios 6 bar keys (classic), or the ios 7 bar (flat). replaces
+   UINavigationBar so the look is the same from ios 4 to ios 7 */
 #import <UIKit/UIKit.h>
 #import "LRButton.h"
 

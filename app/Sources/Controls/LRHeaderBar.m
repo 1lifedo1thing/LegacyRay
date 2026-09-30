@@ -7,8 +7,7 @@
 
 + (UIColor *)glyphColor {
     LRSkin *s = SKIN;
-    if (s->flat) return s->tint;
-    return s->night ? [UIColor colorWithWhite:0.88f alpha:1] : [UIColor colorWithWhite:0.25f alpha:1];
+    return s->flat ? s->tint : s->barInk;
 }
 
 - (id)initWithFrame:(CGRect)frame {
@@ -18,10 +17,10 @@
         LRSkin *s = SKIN;
         _titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
         _titleLabel.backgroundColor = [UIColor clearColor];
-        _titleLabel.font = [LRSkin titleFont:18];
-        _titleLabel.textColor = s->engrave;
-        _titleLabel.shadowColor = s->engraveShadow;
-        _titleLabel.shadowOffset = CGSizeMake(0, s->engraveOffset);
+        _titleLabel.font = [LRSkin titleFont:20];
+        _titleLabel.textColor = s->barInk;
+        _titleLabel.shadowColor = s->barShadow;
+        _titleLabel.shadowOffset = CGSizeMake(0, -1);
         _titleLabel.textAlignment = NSTextAlignmentCenter;
         _titleLabel.adjustsFontSizeToFitWidth = YES;
         _titleLabel.minimumFontSize = 12;
@@ -29,8 +28,9 @@
         if (s->flat) {
             _titleLabel.font = [LRSkin titleFont:17];
         } else {
+            /* the bar's shadow on the page; the path keeps it cheap */
             self.layer.shadowColor = [UIColor blackColor].CGColor;
-            self.layer.shadowOpacity = 0.45f;
+            self.layer.shadowOpacity = 0.4f;
             self.layer.shadowOffset = CGSizeMake(0, 1);
             self.layer.shadowRadius = 2;
         }
@@ -90,19 +90,8 @@
     CGRect b = self.bounds;
     LRSkin *s = SKIN;
     if (_translucent) return;
-    if (s->flat) {
-        [s->plateTop setFill];
-        CGContextFillRect(ctx, b);
-        [s->separator setFill];
-        CGContextFillRect(ctx, CGRectMake(0, b.size.height - LRHairline(), b.size.width, LRHairline()));
-        return;
-    }
-    LRDrawBrushedMetal(ctx, b, s->plateTop, s->plateBottom, s->hairLight, s->hairDark, 21);
-    /* top highlight, bottom groove */
-    CGContextSetRGBFillColor(ctx, 1, 1, 1, s->night ? 0.12f : 0.7f);
-    CGContextFillRect(ctx, CGRectMake(0, 0, b.size.width, 1));
-    CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.55f);
-    CGContextFillRect(ctx, CGRectMake(0, b.size.height - 1, b.size.width, 1));
+    (void)s;
+    LRDrawBar(ctx, b);
 }
 
 - (void)setTitle:(NSString *)title {
@@ -139,16 +128,21 @@
 }
 
 - (LRButton *)setExtraGlyph:(UIImage *)glyph action:(void (^)(LRButton *))action {
-    LRButton *b = [self makeButton:nil style:LRButtonMetal action:action];
+    LRButton *b = [self makeButton:nil style:LRButtonBar action:action];
     [b setGlyph:glyph];
     self.extraButton = b;
     return b;
 }
 
+/* keys on a bar: the plain key becomes a bar key, green (save, done) the
+   blue done key */
 - (LRButton *)makeButton:(NSString *)title style:(LRButtonStyle)style action:(void (^)(LRButton *))action {
+    if (style == LRButtonMetal) style = LRButtonBar;
+    else if (style == LRButtonGreen) style = LRButtonDone;
     LRButton *b = [LRButton buttonWithStyle:style title:title action:action];
     b.frame = CGRectMake(0, 0, 60, 30);
-    b.titleLabel.font = SKIN->flat ? [LRSkin bodyFont:17] : [LRSkin boldFont:12];
+    b.titleLabel.font = SKIN->flat ? (style == LRButtonDone ? [LRSkin boldFont:17] : [LRSkin bodyFont:17])
+                                   : [LRSkin boldFont:12];
     if (SKIN->flat && style == LRButtonBack)
         b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
     return b;
@@ -170,7 +164,7 @@
 }
 
 - (LRButton *)setRightGlyph:(UIImage *)glyph action:(void (^)(LRButton *))action {
-    LRButton *b = [self makeButton:nil style:LRButtonMetal action:action];
+    LRButton *b = [self makeButton:nil style:LRButtonBar action:action];
     [b setGlyph:glyph];
     self.rightButton = b;
     return b;
@@ -178,7 +172,7 @@
 
 - (CGFloat)widthForButton:(LRButton *)b {
     NSString *t = [b titleForState:UIControlStateNormal];
-    if (![t length]) return 40;
+    if (![t length]) return SKIN->flat ? 40 : 36;
     CGFloat w = [t sizeWithFont:b.titleLabel.font].width + (b.style == LRButtonBack ? 28 : 20);
     return MIN(MAX(w, 50), self.bounds.size.width * 0.3f);
 }
@@ -186,6 +180,8 @@
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect full = self.bounds;
+    if (self.layer.shadowOpacity > 0)
+        self.layer.shadowPath = [UIBezierPath bezierPathWithRect:full].CGPath;
     _blur.frame = full;
     _hairline.frame = CGRectMake(0, full.size.height - LRHairline(), full.size.width, LRHairline());
     [self bringSubviewToFront:_hairline];

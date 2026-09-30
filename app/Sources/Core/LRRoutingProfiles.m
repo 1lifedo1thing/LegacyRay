@@ -10,6 +10,7 @@
 #import "LRModels.h"
 #import <arpa/inet.h>
 #include "b64.h"
+#include "lr_site.h"
 
 NSString * const LRRoutingProfilesDidChangeNotification = @"LRRoutingProfilesDidChangeNotification";
 
@@ -192,11 +193,10 @@ static BOOL LRIsIPv4Text(NSString *s) {
         } else if ([host rangeOfString:@":"].location != NSNotFound) {
             return nil; /* ipv6: the routing layers are ipv4 */
         } else {
-            /* a bare name means the site and everything under it */
+            /* a bare name in a list means the site and everything under it;
+               idn names go in as punycode */
             type = @"domain-suffix";
-            value = lower;
-            if ([value hasPrefix:@"*."]) value = [value substringFromIndex:2];
-            if ([value hasPrefix:@"."]) value = [value substringFromIndex:1];
+            value = [self siteHost:e kind:NULL wildcard:NULL];
         }
     }
     if (![type length] || ![value length]) return nil;
@@ -469,14 +469,66 @@ static NSArray *LRListValue(id v) {
     return out;
 }
 
-+ (NSString *)amneziaExportForSites:(NSArray *)sites {
++ (NSString *)amneziaExportForRuleSpecs:(NSArray *)specs {
     NSMutableArray *items = [NSMutableArray array];
-    for (NSString *s in sites) {
-        NSString *host = [s hasSuffix:@"/32"] ? [s substringToIndex:[s length] - 3] : s;
-        BOOL ip = LRIsIPv4Text([[host componentsSeparatedByString:@"/"] objectAtIndex:0]);
-        [items addObject:[NSDictionary dictionaryWithObjectsAndKeys:ip ? @"" : host, @"hostname",
-                          ip ? host : @"", @"ip", nil]];
+    for (NSArray *spec in specs) {
+        NSString *type = [spec objectAtIndex:0], *value = [spec objectAtIndex:1];
+        if ([type isEqualToString:@"ip-cidr"]) {
+            NSString *ip = [value hasSuffix:@"/32"] ? [value substringToIndex:[value length] - 3] : value;
+            [items addObject:[NSDictionary dictionaryWithObjectsAndKeys:@"", @"hostname", ip, @"ip", nil]];
+            continue;
+        }
+        NSString *host = [type isEqualToString:@"domain-suffix"] ? [@"*." stringByAppendingString:value] : value;
+        [items addObject:[NSDictionary dictionaryWithObjectsAndKeys:host, @"hostname", @"", @"ip", nil]];
     }
     return LRJSONString(items);
+}
+
+#pragma mark sites
+
++ (NSString *)siteHost:(NSString *)input kind:(LRSiteKind *)kind wildcard:(BOOL *)wildcard {
+    const char *text = [input UTF8String];
+    if (!text) return nil;
+    char out[LR_SITE_MAX];
+    lr_site_kind_t k;
+    int wild = 0;
+    if (lr_site_parse(text, out, sizeof out, &k, &wild) != 0) return nil;
+    if (kind) *kind = k == LR_SITE_IPV4 ? LRSiteAddress : (k == LR_SITE_CIDR ? LRSiteRange : LRSiteName);
+    if (wildcard) *wildcard = wild != 0;
+    return [NSString stringWithUTF8String:out];
+}
+
++ (NSString *)headDomain:(NSString *)host {
+    const char *text = [host UTF8String];
+    return text ? [NSString stringWithUTF8String:lr_site_head(text)] : host;
+}
+
++ (NSString *)displaySite:(NSString *)host {
+    const char *text = [host UTF8String];
+    if (!text || !strstr(text, "xn--")) return host;
+    char out[LR_SITE_MAX * 2];
+    lr_site_display(text, out, sizeof out);
+    NSString *shown = [NSString stringWithUTF8String:out];
+    return shown ? shown : host;
+}
+
++ (NSArray *)ruleSpecForSite:(NSString *)input mode:(LRSiteMode)mode action:(NSString *)action {
+    LRSiteKind kind;
+    BOOL wildcard;
+    NSString *host = [self siteHost:input kind:&kind wildcard:&wildcard];
+    if (!host) return nil;
+    if (kind == LRSiteAddress)
+        return [NSArray arrayWithObjects:action, @"ip-cidr", [host stringByAppendingString:@"/32"], nil];
+    if (kind == LRSiteRange) return [NSArray arrayWithObjects:action, @"ip-cidr", host, nil];
+    if (wildcard) return [NSArray arrayWithObjects:action, @"domain-suffix", host, nil];
+    if (mode == LRSiteExact) return [NSArray arrayWithObjects:action, @"domain", host, nil];
+    return [NSArray arrayWithObjects:action, @"domain-suffix", [self headDomain:host], nil];
+}
+
++ (NSString *)patternForRuleType:(NSString *)type value:(NSString *)value {
+    NSString *shown = [self displaySite:value];
+    if ([type isEqualToString:@"domain"]) return [shown stringByAppendingString:@"/*"];
+    if ([type isEqualToString:@"domain-suffix"]) return [NSString stringWithFormat:@"*.%@/*", shown];
+    return shown;
 }
 @end

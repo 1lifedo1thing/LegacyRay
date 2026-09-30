@@ -6,6 +6,7 @@
 @public
     CGFloat arrowX;     /* ipad: x of the arrow tip in panel coordinates, <0 none */
     BOOL arrowUp;
+    BOOL floating;      /* the ipad popover, not the phone's sheet */
     NSMutableArray *groups;       /* flat skin: white rounded groups */
     NSMutableArray *separators;   /* flat skin: hairlines between rows */
 }
@@ -41,29 +42,48 @@
         for (NSValue *v in separators) CGContextFillRect(ctx, [v CGRectValue]);
         return;
     }
-    CGRect body = arrowX >= 0 ? CGRectInset(b, 0, 0) : b;
+    if (!floating) {
+        /* the black translucent action sheet */
+        CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.78f);
+        CGContextFillRect(ctx, b);
+        LRFillVertical(ctx, CGRectMake(0, 0, b.size.width, 40), [UIColor colorWithWhite:1 alpha:0.12f],
+                       [UIColor colorWithWhite:1 alpha:0]);
+        CGContextSetRGBFillColor(ctx, 1, 1, 1, 0.25f);
+        CGContextFillRect(ctx, CGRectMake(0, 0, b.size.width, 1));
+        return;
+    }
+    /* the ios 6 popover: a dark glassy frame with an arrow, white rows in it */
+    CGRect body = b;
     if (arrowX >= 0) {
         if (arrowUp) { body.origin.y += 10; body.size.height -= 10; }
         else body.size.height -= 10;
     }
     CGContextSaveGState(ctx);
-    LRAddRoundRect(ctx, body, 12);
+    LRAddRoundRect(ctx, body, 10);
     if (arrowX >= 0) {
-        CGFloat ay = arrowUp ? body.origin.y : CGRectGetMaxY(body);
-        CGFloat tip = arrowUp ? ay - 10 : ay + 10;
-        CGContextMoveToPoint(ctx, arrowX - 11, ay);
+        CGFloat ay = arrowUp ? body.origin.y + 1 : CGRectGetMaxY(body) - 1;
+        CGFloat tip = arrowUp ? ay - 11 : ay + 11;
+        CGContextMoveToPoint(ctx, arrowX - 12, ay);
         CGContextAddLineToPoint(ctx, arrowX, tip);
-        CGContextAddLineToPoint(ctx, arrowX + 11, ay);
+        CGContextAddLineToPoint(ctx, arrowX + 12, ay);
         CGContextClosePath(ctx);
     }
     CGContextClip(ctx);
-    LRDrawBrushedMetal(ctx, b, s->plateTop, s->plateBottom, s->hairLight, s->hairDark, 44);
-    LRDrawNoise(ctx, b, 0.08f);
+    LRFillVertical(ctx, b, [UIColor colorWithRed:0.26f green:0.27f blue:0.29f alpha:1],
+                   [UIColor colorWithRed:0.08f green:0.09f blue:0.10f alpha:1]);
+    LRFillVertical(ctx, CGRectMake(0, body.origin.y, b.size.width, 22), [UIColor colorWithWhite:1 alpha:0.14f],
+                   [UIColor colorWithWhite:1 alpha:0.03f]);
     CGContextRestoreGState(ctx);
-    LRAddRoundRect(ctx, CGRectInset(body, 0.5f, 0.5f), 12);
-    CGContextSetRGBStrokeColor(ctx, 1, 1, 1, s->night ? 0.12f : 0.65f);
-    CGContextSetLineWidth(ctx, 1);
-    CGContextStrokePath(ctx);
+    for (NSValue *v in groups) {
+        CGRect g = [v CGRectValue];
+        CGContextSaveGState(ctx);
+        LRAddRoundRect(ctx, g, 5);
+        [[UIColor whiteColor] setFill];
+        CGContextFillPath(ctx);
+        CGContextRestoreGState(ctx);
+    }
+    [s->groupLine setFill];
+    for (NSValue *v in separators) CGContextFillRect(ctx, [v CGRectValue]);
 }
 @end
 
@@ -125,35 +145,43 @@
 - (void)buildPanel {
     LRMenuPanel *panel = [[LRMenuPanel alloc] initWithFrame:CGRectZero];
     panel->arrowX = -1;
+    panel->floating = [self floating];
     panel.backgroundColor = [UIColor clearColor];
     panel.contentMode = UIViewContentModeRedraw;
     panel.layer.shadowColor = [UIColor blackColor].CGColor;
-    panel.layer.shadowOpacity = SKIN->flat ? (LRIsPad() ? 0.2f : 0) : 0.6f;
+    panel.layer.shadowOpacity = SKIN->flat ? (LRIsPad() ? 0.2f : 0) : ([self floating] ? 0.5f : 0);
     panel.layer.shadowRadius = 8;
     panel.layer.shadowOffset = CGSizeMake(0, 3);
     _panel = panel;
     LRSkin *s = SKIN;
+    BOOL popover = !s->flat && [self floating];
     if ([_title length]) {
         UILabel *t = [[[UILabel alloc] init] autorelease];
         t.tag = 900;
         t.text = _title;
         t.numberOfLines = 2;
-        t.font = s->flat ? [LRSkin bodyFont:13] : [LRSkin boldFont:13];
+        t.font = s->flat ? [LRSkin bodyFont:13] : (popover ? [LRSkin boldFont:15] : [LRSkin bodyFont:14]);
         t.textAlignment = NSTextAlignmentCenter;
         t.backgroundColor = [UIColor clearColor];
-        t.textColor = s->flat ? s->groupMuted : LRColorAlpha(s->engrave, 0.9f);
-        t.shadowColor = s->engraveShadow;
-        t.shadowOffset = CGSizeMake(0, s->engraveOffset);
+        t.textColor = s->flat ? s->groupMuted : (popover ? [UIColor whiteColor] : [UIColor colorWithWhite:0.82f alpha:1]);
+        t.shadowColor = s->flat ? nil : [UIColor colorWithWhite:0 alpha:0.6f];
+        t.shadowOffset = CGSizeMake(0, -1);
         [_panel addSubview:t];
     }
     NSUInteger i = 0;
     for (NSDictionary *item in _items) {
         LRButtonStyle style = (LRButtonStyle)[[item objectForKey:@"style"] intValue];
-        LRButton *b = [LRButton buttonWithStyle:s->flat ? LRButtonMetal : style
-                                          title:[item objectForKey:@"title"] action:nil];
-        b.frame = CGRectMake(0, 0, 100, 42);
-        b.titleLabel.font = s->flat ? [LRSkin bodyFont:19] : [LRSkin boldFont:15];
-        if (s->flat && style == LRButtonRed) [b setTitleColor:s->ledRed forState:UIControlStateNormal];
+        BOOL destructive = style == LRButtonRed;
+        LRButtonStyle shown = s->flat ? LRButtonMetal
+            : (popover ? LRButtonRow : (destructive ? LRButtonRed : LRButtonAlert));
+        LRButton *b = [LRButton buttonWithStyle:shown title:[item objectForKey:@"title"] action:nil];
+        b.frame = CGRectMake(0, 0, 100, 44);
+        b.titleLabel.font = s->flat ? [LRSkin bodyFont:19] : [LRSkin boldFont:popover ? 17 : 18];
+        if (destructive && (s->flat || popover)) [b setTitleColor:s->flat ? s->ledRed : s->bad forState:UIControlStateNormal];
+        if (popover) {
+            b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+            b.contentEdgeInsets = UIEdgeInsetsMake(0, 14, 0, 14);
+        }
         b.tag = (NSInteger)i++;
         [b addTarget:self action:@selector(itemTapped:) forControlEvents:UIControlEventTouchUpInside];
         [_panel addSubview:b];
@@ -161,12 +189,40 @@
     if (![self floating]) {
         LRButton *cancel = [LRButton buttonWithStyle:s->flat ? LRButtonMetal : LRButtonDark
                                                title:L(@"Cancel") action:nil];
-        cancel.frame = CGRectMake(0, 0, 100, 42);
-        cancel.titleLabel.font = s->flat ? [LRSkin boldFont:19] : [LRSkin boldFont:15];
+        cancel.frame = CGRectMake(0, 0, 100, 44);
+        cancel.titleLabel.font = s->flat ? [LRSkin boldFont:19] : [LRSkin boldFont:18];
         cancel.tag = 901;
         [cancel addTarget:self action:@selector(dismiss) forControlEvents:UIControlEventTouchUpInside];
         [_panel addSubview:cancel];
     }
+}
+
+/* the ios 6 popover: a title in the frame, white rows under it */
+- (CGFloat)layoutPopoverRows:(CGFloat)width top:(CGFloat)top {
+    LRMenuPanel *panel = (LRMenuPanel *)_panel;
+    [panel->groups release];
+    panel->groups = [[NSMutableArray alloc] init];
+    [panel->separators release];
+    panel->separators = [[NSMutableArray alloc] init];
+    CGFloat frame = 7, y = top + frame;
+    CGFloat w = width - frame * 2;
+    UILabel *t = (UILabel *)[_panel viewWithTag:900];
+    if (t) {
+        CGSize ts = [t.text sizeWithFont:t.font constrainedToSize:CGSizeMake(w - 20, 60)];
+        t.frame = CGRectMake(frame + 10, y + 2, w - 20, ceilf(ts.height));
+        y += ceilf(ts.height) + 12;
+    }
+    CGFloat groupTop = y;
+    BOOL first = YES;
+    for (UIView *v in _panel.subviews) {
+        if (![v isKindOfClass:[LRButton class]] || v.tag == 901) continue;
+        if (!first) [panel->separators addObject:[NSValue valueWithCGRect:CGRectMake(frame, y, w, 1)]];
+        v.frame = CGRectMake(frame, y + (first ? 0 : 1), w, first ? 44 : 43);
+        y += 44;
+        first = NO;
+    }
+    [panel->groups addObject:[NSValue valueWithCGRect:CGRectMake(frame, groupTop, w, y - groupTop)]];
+    return y + frame;
 }
 
 /* flat rows: full width, 50 points, hairlines between; the cancel key gets
@@ -209,7 +265,8 @@
 /* lays the rows out for a panel width and returns the height */
 - (CGFloat)layoutRows:(CGFloat)width top:(CGFloat)top {
     if (SKIN->flat) return [self layoutFlatRows:width top:top];
-    CGFloat pad = 14, y = top + 14;
+    if ([self floating]) return [self layoutPopoverRows:width top:top];
+    CGFloat pad = 20, y = top + 16;
     UILabel *t = (UILabel *)[_panel viewWithTag:900];
     if (t) {
         CGSize ts = [t.text sizeWithFont:t.font constrainedToSize:CGSizeMake(width - pad * 2, 60)];
@@ -218,14 +275,14 @@
     }
     for (UIView *v in _panel.subviews) {
         if (![v isKindOfClass:[LRButton class]] || v.tag == 901) continue;
-        v.frame = CGRectMake(pad, y, width - pad * 2, 42);
-        y += 48;
+        v.frame = CGRectMake(pad, y, width - pad * 2, 44);
+        y += 52;
     }
     UIView *cancel = [_panel viewWithTag:901];
     if (cancel) {
-        y += 6;
-        cancel.frame = CGRectMake(pad, y, width - pad * 2, 42);
-        y += 48;
+        y += 10;
+        cancel.frame = CGRectMake(pad, y, width - pad * 2, 44);
+        y += 52;
     }
     return y + 8;
 }
@@ -248,10 +305,11 @@
             [_panel setNeedsDisplay];
             return;
         }
-        _panel.frame = CGRectMake(roundf((b.size.width - w) / 2), b.size.height - h + 12, w, h + 12);
+        _panel.frame = CGRectMake(roundf((b.size.width - w) / 2), b.size.height - h, w, h);
+        [_panel setNeedsDisplay];
         return;
     }
-    CGFloat w = 290;
+    CGFloat w = SKIN->flat ? 290 : 300;
     CGRect a = _anchor ? [self convertRect:_anchor.bounds fromView:_anchor] : CGRectZero;
     BOOL anchored = _anchor && !CGRectIsEmpty(a) && CGRectIntersectsRect(a, b);
     if (!anchored) {

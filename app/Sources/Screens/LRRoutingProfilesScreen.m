@@ -9,6 +9,7 @@
 #import "LRShareScreen.h"
 #import "LRSimpleScreens.h"
 #import "LRActivityLog.h"
+#import "LRTextField.h"
 
 static LRDaemonSettings *DS(void) { return [LRDaemonSettings shared]; }
 
@@ -191,13 +192,7 @@ static LRDaemonSettings *DS(void) { return [LRDaemonSettings shared]; }
     step();
 }
 
-- (void)addEntries:(NSArray *)entries {
-    NSMutableArray *specs = [NSMutableArray array];
-    for (NSString *e in entries) {
-        NSArray *spec = [LRRoutingProfiles ruleSpecForEntry:e action:[self listAction]];
-        if (spec) [specs addObject:spec];
-    }
-    if (![specs count]) { [LRToast showError:L(@"No sites found")]; return; }
+- (void)addRuleSpecs:(NSArray *)specs {
     _busy = YES;
     [self reloadSections];
     [LRRoutingProfiles changeRules:^(void (^finish)(void)) {
@@ -206,10 +201,24 @@ static LRDaemonSettings *DS(void) { return [LRDaemonSettings shared]; }
             [self load];
             finish();
             if (failed) [LRToast showError:[NSString stringWithFormat:L(@"%lu sites were not accepted"), (unsigned long)failed]];
+            else if ([specs count] == 1)
+                [LRToast showSuccess:[NSString stringWithFormat:L(@"%@ added"),
+                                      [LRRoutingProfiles patternForRuleType:[[specs objectAtIndex:0] objectAtIndex:1]
+                                                                      value:[[specs objectAtIndex:0] objectAtIndex:2]]]];
             else [LRToast showSuccess:[NSString stringWithFormat:L(@"%lu sites added"), (unsigned long)[specs count]]];
             LRLog(@"routing", @"%lu sites added to the split tunnel list", (unsigned long)[specs count]);
         }];
     }];
+}
+
+- (void)addEntries:(NSArray *)entries {
+    NSMutableArray *specs = [NSMutableArray array];
+    for (NSString *e in entries) {
+        NSArray *spec = [LRRoutingProfiles ruleSpecForEntry:e action:[self listAction]];
+        if (spec) [specs addObject:spec];
+    }
+    if (![specs count]) { [LRToast showError:L(@"No sites found")]; return; }
+    [self addRuleSpecs:specs];
 }
 
 - (void)setOnlyListed:(BOOL)only {
@@ -242,6 +251,48 @@ static LRDaemonSettings *DS(void) { return [LRDaemonSettings shared]; }
     }];
 }
 
+/* a site switched between the two modes: the old rule goes, the new one comes */
+- (void)replaceRule:(LRRule *)rule type:(NSString *)type value:(NSString *)value {
+    NSArray *spec = [NSArray arrayWithObjects:rule.action, type, value, nil];
+    _busy = YES;
+    [self reloadSections];
+    [LRRoutingProfiles changeRules:^(void (^finish)(void)) {
+        [[LRDaemonClient shared] deleteRuleIndex:rule.index reply:^(NSString *reply) {
+            [self addSpecs:[NSArray arrayWithObject:spec] done:^(NSUInteger failed) {
+                self->_busy = NO;
+                if (failed) [LRToast showError:L(@"The site was not accepted")];
+                [self load];
+                finish();
+            }];
+        }];
+    }];
+}
+
+- (NSString *)describeRule:(LRRule *)r {
+    NSString *pattern = [LRRoutingProfiles patternForRuleType:r.type value:r.value];
+    if ([r.type isEqualToString:@"domain"]) return [NSString stringWithFormat:@"%@ · %@", L(@"Specific domain"), pattern];
+    if ([r.type isEqualToString:@"domain-suffix"]) return [NSString stringWithFormat:@"%@ · %@", L(@"Head domain"), pattern];
+    return L(@"Addresses");
+}
+
+- (void)showMenuForRule:(LRRule *)r from:(UIView *)anchor {
+    __block LRSitesScreen *me = self;
+    NSString *shown = [LRRoutingProfiles displaySite:r.value];
+    LRMenu *menu = [LRMenu menuWithTitle:[LRRoutingProfiles patternForRuleType:r.type value:r.value]];
+    if (![r.type isEqualToString:@"ip-cidr"]) {
+        if (![r.type isEqualToString:@"domain"])
+            [menu addItem:[NSString stringWithFormat:L(@"Specific domain: %@/*"), shown] action:^{
+                [me replaceRule:r type:@"domain" value:r.value];
+            }];
+        NSString *head = [LRRoutingProfiles headDomain:r.value];
+        if (![r.type isEqualToString:@"domain-suffix"] || ![head isEqualToString:r.value])
+            [menu addItem:[NSString stringWithFormat:L(@"Head domain: *.%@/*"), [LRRoutingProfiles displaySite:head]]
+                   action:^{ [me replaceRule:r type:@"domain-suffix" value:head]; }];
+    }
+    [menu addDestructiveItem:L(@"Remove from the list") action:^{ [me removeRule:r]; }];
+    [menu showFromView:anchor];
+}
+
 - (NSArray *)buildSections {
     __block LRSitesScreen *me = self;
     NSMutableArray *sections = [NSMutableArray array];
@@ -254,25 +305,26 @@ static LRDaemonSettings *DS(void) { return [LRDaemonSettings shared]; }
             [me setOnlyListed:YES];
         }], nil]
                                        footer:_busy ? L(@"Updating the rules...")
-                                                    : L(@"A site covers its subdomains. Addresses and ranges work too. Changing the list restarts a connected tunnel.")]];
+                                                    : L(@"Changing the list restarts a connected tunnel.")]];
     NSMutableArray *rows = [NSMutableArray array];
     for (LRRule *r in [self siteRules]) {
-        LRRow *row = [LRRow value:r.value detail:nil action:^(LRRow *row, UIView *c) {
-            LRMenu *menu = [LRMenu menuWithTitle:r.value];
-            [menu addDestructiveItem:L(@"Remove from the list") action:^{ [me removeRule:r]; }];
-            [menu showFromView:c];
+        LRRow *row = [LRRow value:[LRRoutingProfiles displaySite:r.value] detail:nil action:^(LRRow *row, UIView *c) {
+            [me showMenuForRule:r from:c];
         }];
+        row.chevron = NO;
+        row.subtitle = [self describeRule:r];
         [rows addObject:row];
     }
     if (![rows count]) [rows addObject:[LRRow text:L(@"The list is empty.")]];
     [sections addObject:[LRSectionSpec header:only ? L(@"Through the VPN") : L(@"Around the VPN")
-                                         rows:rows footer:nil]];
+                                         rows:rows
+                                       footer:L(@"A specific domain is that name and its pages only. A head domain is the name and every name under it. Tap a site to switch.")]];
     [sections addObject:[LRSectionSpec header:nil rows:[NSArray arrayWithObjects:
         [LRRow button:L(@"Add a site") style:LRRowStyleAccent action:^(LRRow *r, UIView *c) {
-            [LRAlert promptTitle:L(@"Add a site") message:L(@"A domain like example.com, or an address")
-                     placeholder:@"example.com" text:nil button:L(@"Add") done:^(NSString *value) {
-                [me addEntries:[LRRoutingProfiles sitesFromText:value]];
-            }];
+            LRSiteAddScreen *add = [[[LRSiteAddScreen alloc] initWithAction:[me listAction] done:^(NSArray *spec) {
+                [me addRuleSpecs:[NSArray arrayWithObject:spec]];
+            }] autorelease];
+            [me openScreen:add];
         }],
         [LRRow button:L(@"Import from Clipboard") style:LRRowStyleAccent action:^(LRRow *r, UIView *c) {
             NSString *text = [UIPasteboard generalPasteboard].string;
@@ -280,15 +332,126 @@ static LRDaemonSettings *DS(void) { return [LRDaemonSettings shared]; }
             [me addEntries:[LRRoutingProfiles sitesFromText:text]];
         }],
         [LRRow button:L(@"Export the list") style:LRRowStyleAccent action:^(LRRow *r, UIView *c) {
-            NSMutableArray *sites = [NSMutableArray array];
-            for (LRRule *rule in [me siteRules]) [sites addObject:rule.value];
+            NSMutableArray *specs = [NSMutableArray array];
+            for (LRRule *rule in [me siteRules])
+                [specs addObject:[NSArray arrayWithObjects:rule.type, rule.value, nil]];
             LRShareScreen *share = [[[LRShareScreen alloc] initWithTitle:L(@"Split tunneling")
-                payload:[LRRoutingProfiles amneziaExportForSites:sites]] autorelease];
+                payload:[LRRoutingProfiles amneziaExportForRuleSpecs:specs]] autorelease];
             share.fileName = @"sites.json";
             [me openScreen:share];
         }], nil]
-                                       footer:L(@"Lists exported from Amnezia VPN (JSON) and plain lists with one site per line both import.")]];
+                                       footer:L(@"Lists exported from Amnezia VPN (JSON) and plain lists with one site per line both import. \"*.abc.com\" in a list is a head domain.")]];
     return sections;
+}
+@end
+
+#pragma mark one site
+
+#define LR_SITE_MODE_KEY @"LRSiteMode"
+
+@implementation LRSiteAddScreen
+
+- (id)initWithAction:(NSString *)action done:(void (^)(NSArray *spec))done {
+    if ((self = [super init])) {
+        self.title = L(@"Add a Site");
+        _action = [action copy];
+        _done = [done copy];
+        id saved = [[NSUserDefaults standardUserDefaults] objectForKey:LR_SITE_MODE_KEY];
+        _mode = saved && [saved integerValue] == LRSiteExact ? LRSiteExact : LRSiteHead;
+    }
+    return self;
+}
+
+- (void)dealloc {
+    _field.delegate = nil;
+    [_field release];
+    [_fieldBox release];
+    [_action release];
+    [_done release];
+    [super dealloc];
+}
+
+- (void)viewDidLoad {
+    _fieldBox = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 320, 68)];
+    _fieldBox.backgroundColor = [UIColor clearColor];
+    LRTextField *f = [[LRTextField alloc] initWithFrame:CGRectMake(10, 14, 300, 44)];
+    f.placeholder = @"xyz.abc.com";
+    f.keyboardType = UIKeyboardTypeURL;
+    f.returnKeyType = UIReturnKeyDone;
+    f.delegate = self;
+    [f addTarget:self action:@selector(textChanged) forControlEvents:UIControlEventEditingChanged];
+    _field = f;
+    [_fieldBox addSubview:f];
+    [self setTableHeaderView:_fieldBox];
+    [super viewDidLoad];
+    __block LRSiteAddScreen *me = self;
+    [self.header setRightTitle:L(@"Add") style:LRButtonGreen action:^(LRButton *b) { [me add]; }];
+    [self textChanged];
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    [_field becomeFirstResponder];
+}
+
+- (void)layoutContent {
+    [super layoutContent];
+    CGFloat w = self.tableView.bounds.size.width;
+    CGFloat m = SKIN->flat ? 15 : LRPlateMargin(w);
+    _field.frame = CGRectMake(m, SKIN->flat ? 20 : 14, w - m * 2, 44);
+}
+
+- (void)textChanged {
+    self.header.rightButton.enabled = [LRRoutingProfiles siteHost:_field.text kind:NULL wildcard:NULL] != nil;
+    [self reloadSections];
+}
+
+- (BOOL)textFieldShouldReturn:(UITextField *)textField {
+    [self add];
+    return NO;
+}
+
+- (void)pick:(LRSiteMode)mode {
+    _mode = mode;
+    [self reloadSections];
+}
+
+- (void)add {
+    NSArray *spec = [LRRoutingProfiles ruleSpecForSite:_field.text mode:_mode action:_action];
+    if (!spec) {
+        [LRToast showError:L(@"This is not a site address")];
+        return;
+    }
+    [[NSUserDefaults standardUserDefaults] setInteger:_mode forKey:LR_SITE_MODE_KEY];
+    [_field resignFirstResponder];
+    if (_done) _done(spec);
+    [self close];
+}
+
+- (NSArray *)buildSections {
+    __block LRSiteAddScreen *me = self;
+    LRSiteKind kind = LRSiteName;
+    BOOL wildcard = NO;
+    NSString *host = [LRRoutingProfiles siteHost:_field.text kind:&kind wildcard:&wildcard];
+    if (host && kind != LRSiteName) {
+        return [NSArray arrayWithObject:[LRSectionSpec header:L(@"Match") rows:[NSArray arrayWithObject:
+            [LRRow text:[NSString stringWithFormat:L(@"%@ is an address: it is matched as it is."), host]]] footer:nil]];
+    }
+    NSString *example = host ? host : @"xyz.abc.com";
+    NSString *head = wildcard ? example : [LRRoutingProfiles headDomain:example];
+    NSString *shownExample = [LRRoutingProfiles displaySite:example];
+    NSString *shownHead = [LRRoutingProfiles displaySite:head];
+    LRRow *exact = [LRRow check:L(@"Specific domain") on:_mode == LRSiteExact && !wildcard action:^(LRRow *r, UIView *c) {
+        [me pick:LRSiteExact];
+    }];
+    exact.subtitle = [NSString stringWithFormat:L(@"Only %@/* — not its subdomains"), shownExample];
+    exact.enabled = !wildcard;
+    LRRow *whole = [LRRow check:L(@"Head domain") on:_mode == LRSiteHead || wildcard action:^(LRRow *r, UIView *c) {
+        [me pick:LRSiteHead];
+    }];
+    whole.subtitle = [NSString stringWithFormat:L(@"%@/* and *.%@/* — every subdomain"), shownHead, shownHead];
+    return [NSArray arrayWithObject:[LRSectionSpec header:L(@"Match") rows:[NSArray arrayWithObjects:exact, whole, nil]
+        footer:L(@"Paste a link or type a name; \"*.abc.com\" is a head domain as typed. Routing sees the site's name, not the page, so a rule covers every page of what it matches.")]];
 }
 @end
 

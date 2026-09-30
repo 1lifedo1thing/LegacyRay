@@ -121,6 +121,11 @@ static void LRRoutingChanged(void) {
         [LRRow value:L(@"Rules and exceptions") detail:routingDetail action:^(LRRow *r, UIView *c) {
             [me openScreen:[[[LRRoutingScreen alloc] init] autorelease]];
         }],
+        [LRRow value:L(@"Split tunneling")
+              detail:[[DS() stringForKey:@"rules_default"] isEqualToString:@"direct"] ? L(@"Only the list") : L(@"All but the list")
+              action:^(LRRow *r, UIView *c) {
+            [me openScreen:[[[LRSitesScreen alloc] init] autorelease]];
+        }],
         [self daemonToggle:L(@"Bypass local networks") key:@"bypass_lan" fallback:YES routing:YES], nil]
                                        footer:nil]];
 
@@ -256,22 +261,22 @@ static void LRRoutingChanged(void) {
                                        footer:L(@"Panels identify this device by its HWID and pick the feed format by the User-Agent.")]];
 
     /* appearance */
-    NSArray *themeNames = [NSArray arrayWithObjects:L(@"Automatic"), L(@"Silver"), L(@"Graphite"), L(@"Flat"),
-                           L(@"Classic, by time of day"), nil];
+    NSArray *themeNames = [NSArray arrayWithObjects:L(@"Automatic"), L(@"Classic"), L(@"Flat"), nil];
+    LRThemeSetting theme = [LRPrefs theme];
+    NSInteger themeIndex = theme == LRThemeFlat ? 2 : (theme == LRThemeClassic ? 1 : 0);
     NSArray *langs = [NSArray arrayWithObjects:LRLanguageName(LRLanguageAuto), @"English", @"Русский", @"中文", nil];
     NSArray *sorts = [NSArray arrayWithObjects:L(@"As added"), L(@"By name"), L(@"By latency"), nil];
     NSArray *appearance = [NSArray arrayWithObjects:
-        [LRRow value:L(@"Theme") detail:[themeNames objectAtIndex:[LRPrefs theme]] action:^(LRRow *r, UIView *c) {
+        [LRRow value:L(@"Theme") detail:[themeNames objectAtIndex:themeIndex] action:^(LRRow *r, UIView *c) {
             LRChoiceScreen *choice = [[[LRChoiceScreen alloc] initWithTitle:L(@"Theme") options:themeNames
-                                                                   selected:[LRPrefs theme] picked:^(NSInteger i) {
-                [LRPrefs setTheme:(LRThemeSetting)i];
+                                                                   selected:themeIndex picked:^(NSInteger i) {
+                LRThemeSetting picked[3] = { LRThemeAuto, LRThemeClassic, LRThemeFlat };
+                [LRPrefs setTheme:picked[i < 0 || i > 2 ? 0 : i]];
                 [[LRAppDelegate shared] performSelector:@selector(rebuildInterface) withObject:nil afterDelay:0.25];
             }] autorelease];
             choice.notes = [NSArray arrayWithObjects:L(@"Flat on iOS 7 and later, classic before"),
-                            L(@"Brushed aluminium, blue display, saddle leather"),
-                            L(@"Dark metal, amber display, black leather"),
-                            L(@"White cards and hairlines, like iOS 7"),
-                            L(@"Silver by day, Graphite from 20:00 to 7:00"), nil];
+                            L(@"iOS 6: black denim bars, grouped tables"),
+                            L(@"White cards and hairlines, like iOS 7"), nil];
             [me openScreen:choice];
         }],
         [LRRow value:L(@"Language") detail:LRLanguageName(LRLanguageSetting()) action:^(LRRow *r, UIView *c) {
@@ -428,9 +433,9 @@ static void LRRoutingChanged(void) {
 }
 
 + (NSString *)typeName:(NSString *)type {
-    if ([type isEqualToString:@"domain-suffix"]) return L(@"Domain suffix");
+    if ([type isEqualToString:@"domain-suffix"]) return L(@"Head domain");
     if ([type isEqualToString:@"domain-keyword"]) return L(@"Keyword");
-    if ([type isEqualToString:@"domain"]) return L(@"Exact domain");
+    if ([type isEqualToString:@"domain"]) return L(@"Specific domain");
     if ([type isEqualToString:@"ip-cidr"]) return @"IP / CIDR";
     if ([type isEqualToString:@"port"]) return L(@"Port or range");
     if ([type isEqualToString:@"geosite"]) return L(@"geosite category");
@@ -633,12 +638,15 @@ static void LRRoutingChanged(void) {
                       @"port", @"geosite", @"geoip", nil];
     NSMutableArray *typeRows = [NSMutableArray array];
     for (NSString *t in types) {
-        [typeRows addObject:[LRRow check:[LRRoutingScreen typeName:t] on:[_type isEqualToString:t]
-                                  action:^(LRRow *r, UIView *c) {
+        LRRow *row = [LRRow check:[LRRoutingScreen typeName:t] on:[_type isEqualToString:t]
+                           action:^(LRRow *r, UIView *c) {
             [me->_type release];
             me->_type = [t copy];
             [me reloadSections];
-        }]];
+        }];
+        if ([t isEqualToString:@"domain-suffix"]) row.subtitle = L(@"abc.com/* and *.abc.com/*");
+        else if ([t isEqualToString:@"domain"]) row.subtitle = L(@"xyz.abc.com/* only");
+        [typeRows addObject:row];
     }
     LRRow *value = [LRRow value:L(@"Value") detail:_value ? _value : [NSString stringWithFormat:@"%@: %@", L(@"Example"), [self example]]
                          action:^(LRRow *r, UIView *c) {
@@ -655,8 +663,16 @@ static void LRRoutingChanged(void) {
             [LRToast showError:L(@"Enter a value first")];
             return;
         }
+        /* a name goes in as the daemon matches it: a link is cut to its
+           host, an idn name becomes punycode */
+        NSString *value = me->_value;
+        if ([me->_type isEqualToString:@"domain"] || [me->_type isEqualToString:@"domain-suffix"]) {
+            LRSiteKind kind;
+            NSString *host = [LRRoutingProfiles siteHost:value kind:&kind wildcard:NULL];
+            if (host && kind == LRSiteName) value = host;
+        }
         LRRuleEditorScreen *strong = [me retain];
-        [[LRDaemonClient shared] addRuleAction:me->_action type:me->_type value:me->_value reply:^(NSString *reply) {
+        [[LRDaemonClient shared] addRuleAction:me->_action type:me->_type value:value reply:^(NSString *reply) {
             [strong autorelease];
             if (LRReplyIsOK(reply)) {
                 LRLog(@"routing", @"rule added");
@@ -671,7 +687,7 @@ static void LRRoutingChanged(void) {
             [LRSectionSpec header:L(@"Action") rows:actionRows footer:nil],
             [LRSectionSpec header:L(@"Match") rows:typeRows footer:nil],
             [LRSectionSpec header:nil rows:[NSArray arrayWithObjects:value, save, nil]
-                           footer:L(@"A suffix matches the domain and all of its subdomains. Ports are TCP destination ports, one or a range.")],
+                           footer:L(@"A head domain matches the name and every name under it, a specific domain only itself. Ports are TCP destination ports, one or a range.")],
             nil];
 }
 @end

@@ -54,7 +54,7 @@
 - (NSArray *)buildSections {
     __block LRAboutScreen *me = self;
     NSArray *info = [NSArray arrayWithObjects:
-        [LRRow text:L(@"A full-device VLESS, Trojan, Shadowsocks, SOCKS and AmneziaWG client for jailbroken iOS 4 to 7, with a receiver for a face.")],
+        [LRRow text:L(@"A full-device VLESS, Trojan, Shadowsocks, SOCKS and AmneziaWG client for jailbroken iOS 4 to 7.")],
         [LRRow value:L(@"Common questions") detail:nil action:^(LRRow *r, UIView *c) {
             [me openScreen:[[[LRFAQScreen alloc] init] autorelease]];
         }],
@@ -93,7 +93,7 @@
 - (NSArray *)buildSections {
     NSArray *qa = [NSArray arrayWithObjects:
         L(@"How do I import?"),
-        L(@"Press IMPORT (or + in the station log) and paste from the clipboard, scan a QR code, type or paste manually, add a subscription URL or pick a file. vless://, trojan://, ss://, socks5://, happ:// links, subscription URLs, base64 lists, Xray and sing-box JSON, Clash YAML, WireGuard / AmneziaWG profiles and Karing backups (zip or LAN send QR) all work."),
+        L(@"Tap + (on the main screen or in the stations) and paste from the clipboard, scan a QR code, type or paste manually, add a subscription URL or pick a file. vless://, trojan://, ss://, socks5://, happ:// links, subscription URLs, base64 lists, Xray and sing-box JSON, Clash YAML, WireGuard / AmneziaWG profiles and Karing backups (zip or LAN send QR) all work."),
         L(@"Which devices are supported?"),
         L(@"Any jailbroken iPhone, iPod touch or iPad on iOS 4.0 to 7.x. iOS 5 and later redirect the whole device through the pf firewall; on iOS 4 there is no pf, so apps are redirected by the MobileSubstrate hook."),
         L(@"Why can't I connect?"),

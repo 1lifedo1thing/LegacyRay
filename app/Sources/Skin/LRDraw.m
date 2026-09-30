@@ -30,12 +30,8 @@ UIColor *LRColorAlpha(UIColor *c, CGFloat alpha) {
     return [UIColor colorWithRed:x[0] green:x[1] blue:x[2] alpha:alpha];
 }
 
-/* deterministic noise so a texture looks the same every launch */
-static unsigned gSeed = 1;
-static void LRSeed(unsigned s) { gSeed = s ? s : 1; }
-static CGFloat LRRand(void) {
-    gSeed = gSeed * 1103515245u + 12345u;
-    return (CGFloat)((gSeed >> 8) & 0xffff) / 65535.0f;
+static UIColor *W(CGFloat white, CGFloat alpha) {
+    return [UIColor colorWithWhite:white alpha:alpha];
 }
 
 #pragma mark paths and fills
@@ -104,14 +100,9 @@ void LRFillRadial(CGContextRef ctx, CGPoint center, CGFloat r0, CGFloat r1,
     CGGradientRelease(g);
 }
 
-#pragma mark texture tiles
+#pragma mark textures
 
 static NSMutableDictionary *gCache = nil;
-
-/* d(ay) / n(ight) / f(lat): every sized image is keyed by the finish */
-static NSString *LRSkinKey(void) {
-    return SKIN->flat ? @"f" : (SKIN->night ? @"n" : @"d");
-}
 
 static id LRCached(NSString *key) {
     return [gCache objectForKey:key];
@@ -130,464 +121,239 @@ void LRFlushSkinCaches(void) {
     [gCache removeObjectsForKeys:drop];
 }
 
-UIImage *LRNoiseTile(void) {
-    UIImage *tile = LRCached(@"tile.noise");
-    if (tile) return tile;
-    const size_t side = 96;
-    unsigned char *px = calloc(side * side * 4, 1);
-    CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
-    CGContextRef bm = CGBitmapContextCreate(px, side, side, 8, side * 4, space,
-                                            kCGImageAlphaPremultipliedLast);
-    LRSeed(97);
-    for (size_t i = 0; i < side * side; ++i) {
-        CGFloat v = LRRand();
-        unsigned char a, c;
-        if (v < 0.5f) { c = 0; a = (unsigned char)((0.5f - v) * 2.0f * 255.0f); }
-        else { c = 255; a = (unsigned char)((v - 0.5f) * 1.2f * 255.0f); }
-        unsigned char pc = (unsigned char)((unsigned)c * a / 255u);
-        px[i * 4 + 0] = pc; px[i * 4 + 1] = pc; px[i * 4 + 2] = pc; px[i * 4 + 3] = a;
-    }
-    CGImageRef img = CGBitmapContextCreateImage(bm);
-    tile = [UIImage imageWithCGImage:img];
-    CGImageRelease(img);
-    CGContextRelease(bm);
-    CGColorSpaceRelease(space);
-    free(px);
-    LRCache(@"tile.noise", tile);
-    return tile;
+UIImage *LRDenimTile(void) {
+    /* imageNamed picks denim@2x.png on a retina screen and keeps it cached */
+    return [UIImage imageNamed:@"denim.png"];
 }
 
-void LRDrawNoise(CGContextRef ctx, CGRect r, CGFloat alpha) {
-    if (SKIN->flat) return;
-    UIImage *tile = LRNoiseTile();
+void LRDrawDenim(CGContextRef ctx, CGRect r, CGFloat shade) {
     CGContextSaveGState(ctx);
-    CGContextClipToRect(ctx, r);
-    CGContextSetAlpha(ctx, alpha);
-    /* tile at device pixel size so the grain stays one pixel fine */
-    CGFloat s = 1.0f / LRScreenScale();
-    CGContextDrawTiledImage(ctx, CGRectMake(0, 0, 96 * s, 96 * s), tile.CGImage);
-    CGContextRestoreGState(ctx);
-}
-
-UIImage *LRPebbleTile(void) {
-    UIImage *tile = LRCached(@"tile.pebble");
-    if (tile) return tile;
-    const CGFloat side = 128;
-    tile = LRImageWithSize(CGSizeMake(side, side), NO, ^(CGContextRef ctx, CGRect rect) {
-        LRSeed(4242);
-        for (int i = 0; i < 1100; ++i) {
-            CGFloat x = LRRand() * side, y = LRRand() * side;
-            CGFloat r = 0.6f + LRRand() * 1.7f;
-            BOOL dark = LRRand() < 0.55f;
-            CGFloat a = dark ? 0.10f + LRRand() * 0.12f : 0.04f + LRRand() * 0.06f;
-            CGContextSetRGBFillColor(ctx, dark ? 0 : 1, dark ? 0 : 1, dark ? 0 : 1, a);
-            for (int dx = -1; dx <= 1; ++dx)
-                for (int dy = -1; dy <= 1; ++dy)
-                    CGContextFillEllipseInRect(ctx, CGRectMake(x - r + dx * side, y - r + dy * side,
-                                                               r * 2, r * 1.7f));
-        }
-        /* a few creases */
-        for (int i = 0; i < 26; ++i) {
-            CGFloat x = LRRand() * side, y = LRRand() * side;
-            CGContextSetRGBStrokeColor(ctx, 0, 0, 0, 0.10f);
-            CGContextSetLineWidth(ctx, 0.6f);
-            CGContextMoveToPoint(ctx, x, y);
-            CGContextAddQuadCurveToPoint(ctx, x + LRRand() * 8 - 4, y + LRRand() * 6,
-                                         x + LRRand() * 14 - 7, y + LRRand() * 10 - 5);
-            CGContextStrokePath(ctx);
-        }
-    });
-    LRCache(@"tile.pebble", tile);
-    return tile;
-}
-
-UIImage *LRLinenTile(void) {
-    UIImage *tile = LRCached(@"tile.linen");
-    if (tile) return tile;
-    const CGFloat side = 64;
-    tile = LRImageWithSize(CGSizeMake(side, side), NO, ^(CGContextRef ctx, CGRect rect) {
-        LRSeed(1313);
-        CGContextSetLineWidth(ctx, 0.5f);
-        for (CGFloat y = 0.25f; y < side; y += 1.0f) {
-            CGFloat a = 0.03f + LRRand() * 0.09f;
-            CGContextSetRGBStrokeColor(ctx, 1, 1, 1, a);
-            CGContextMoveToPoint(ctx, 0, y);
-            CGContextAddLineToPoint(ctx, side, y);
-            CGContextStrokePath(ctx);
-        }
-        for (CGFloat x = 0.25f; x < side; x += 1.0f) {
-            CGFloat a = 0.03f + LRRand() * 0.09f;
-            CGContextSetRGBStrokeColor(ctx, 0, 0, 0, a);
-            CGContextMoveToPoint(ctx, x, 0);
-            CGContextAddLineToPoint(ctx, x, side);
-            CGContextStrokePath(ctx);
-        }
-        for (int i = 0; i < 70; ++i) {
-            CGFloat x = LRRand() * side, y = LRRand() * side;
-            CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.05f);
-            CGContextFillRect(ctx, CGRectMake(x, y, 2 + LRRand() * 5, 0.8f));
-        }
-    });
-    LRCache(@"tile.linen", tile);
-    return tile;
-}
-
-#pragma mark surfaces
-
-void LRDrawBrushedMetal(CGContextRef ctx, CGRect r, UIColor *top, UIColor *bottom,
-                        UIColor *light, UIColor *dark, unsigned seed) {
-    if (SKIN->flat) {
-        if (top) {
-            [top setFill];
-            CGContextFillRect(ctx, r);
-        }
-        return;
-    }
-    CGContextSaveGState(ctx);
-    CGContextClipToRect(ctx, r);
-    if (top && bottom) LRFillVertical(ctx, r, top, bottom);
-    CGFloat lc[4], dc[4];
-    LRRGBA(light, lc);
-    LRRGBA(dark, dc);
-    LRSeed(seed);
-    CGFloat step = 1.0f / LRScreenScale();
-    CGContextSetLineWidth(ctx, step);
-    for (CGFloat y = CGRectGetMinY(r); y < CGRectGetMaxY(r); y += step * (1.0f + LRRand() * 1.4f)) {
-        BOOL isLight = LRRand() < 0.5f;
-        CGFloat *c = isLight ? lc : dc;
-        CGContextSetRGBStrokeColor(ctx, c[0], c[1], c[2], c[3] * (0.35f + LRRand() * 0.95f));
-        CGFloat x0 = CGRectGetMinX(r) + (LRRand() * 0.4f - 0.1f) * r.size.width;
-        CGFloat len = r.size.width * (0.5f + LRRand() * 0.8f);
-        CGContextMoveToPoint(ctx, x0, y + step / 2);
-        CGContextAddLineToPoint(ctx, x0 + len, y + step / 2);
-        CGContextStrokePath(ctx);
-    }
-    /* a soft diagonal sheen, like light across satin aluminium */
-    CGFloat locs[3] = { 0.0f, 0.46f, 0.62f };
-    LRFillLinear(ctx, r.origin, CGPointMake(CGRectGetMaxX(r), CGRectGetMaxY(r)),
-                 [NSArray arrayWithObjects:[UIColor colorWithWhite:1 alpha:0],
-                  [UIColor colorWithWhite:1 alpha:0.09f], [UIColor colorWithWhite:1 alpha:0], nil],
-                 locs);
-    CGContextRestoreGState(ctx);
-}
-
-UIImage *LRFaceplateImage(CGSize size) {
-    NSString *key = [NSString stringWithFormat:@"plate.%@.%.0fx%.0f", LRSkinKey(), size.width, size.height];
-    UIImage *img = LRCached(key);
-    if (img) return img;
-    img = LRImageWithSize(size, YES, ^(CGContextRef ctx, CGRect rect) {
-        LRSkin *s = SKIN;
-        LRDrawBrushedMetal(ctx, rect, s->plateTop, s->plateBottom, s->hairLight, s->hairDark, 7);
-        LRDrawNoise(ctx, rect, 0.10f);
-    });
-    LRCache(key, img);
-    return img;
-}
-
-void LRDrawLeather(CGContextRef ctx, CGRect r) {
-    LRSkin *s = SKIN;
-    if (s->flat) {
-        [s->leather setFill];
-        CGContextFillRect(ctx, r);
-        return;
-    }
-    CGContextSaveGState(ctx);
-    CGContextClipToRect(ctx, r);
-    [s->leatherDark setFill];
+    UIImage *tile = LRDenimTile();
+    /* a pattern colour keeps the twill the right way up; CGContextDrawTiledImage
+       would draw it flipped in a UIKit context */
+    [(tile ? [UIColor colorWithPatternImage:tile] : W(0.10f, 1)) setFill];
     CGContextFillRect(ctx, r);
-    LRFillRadial(ctx, CGPointMake(CGRectGetMidX(r), CGRectGetMinY(r) + r.size.height * 0.3f), 10,
-                 MAX(r.size.width, r.size.height) * 0.85f, s->leather, s->leatherDark);
-    UIImage *tile = LRPebbleTile();
-    CGContextDrawTiledImage(ctx, CGRectMake(0, 0, 128, 128), tile.CGImage);
-    LRDrawNoise(ctx, r, 0.12f);
+    if (shade > 0) {
+        CGContextSetRGBFillColor(ctx, 0, 0, 0, shade);
+        CGContextFillRect(ctx, r);
+    }
     CGContextRestoreGState(ctx);
 }
 
-UIImage *LRLeatherImage(CGSize size) {
-    NSString *key = [NSString stringWithFormat:@"leather.%@.%.0fx%.0f", LRSkinKey(), size.width, size.height];
-    UIImage *img = LRCached(key);
-    if (img) return img;
-    img = LRImageWithSize(size, YES, ^(CGContextRef ctx, CGRect rect) {
-        LRDrawLeather(ctx, rect);
+UIColor *LRDenimPageColor(void) {
+    UIColor *c = LRCached(@"tile.denim.page");
+    if (c) return c;
+    UIImage *tile = LRDenimTile();
+    if (!tile) return W(0.08f, 1);
+    UIImage *shaded = LRImageWithSize(tile.size, YES, ^(CGContextRef ctx, CGRect rect) {
+        LRDrawDenim(ctx, rect, 0.18f);
     });
-    LRCache(key, img);
-    return img;
+    c = [UIColor colorWithPatternImage:shaded];
+    LRCache(@"tile.denim.page", c);
+    return c;
 }
 
-void LRDrawLinen(CGContextRef ctx, CGRect r) {
-    LRSkin *s = SKIN;
-    if (s->flat) {
-        [s->linen setFill];
-        CGContextFillRect(ctx, r);
-        return;
-    }
-    CGContextSaveGState(ctx);
-    CGContextClipToRect(ctx, r);
-    [s->linen setFill];
-    CGContextFillRect(ctx, r);
-    CGContextDrawTiledImage(ctx, CGRectMake(0, 0, 64, 64), LRLinenTile().CGImage);
-    /* vignette */
-    LRFillRadial(ctx, CGPointMake(CGRectGetMidX(r), CGRectGetMidY(r)),
-                 MIN(r.size.width, r.size.height) * 0.3f, MAX(r.size.width, r.size.height) * 0.8f,
-                 [UIColor colorWithWhite:0 alpha:0], [UIColor colorWithWhite:0 alpha:s->night ? 0.35f : 0.12f]);
-    CGContextRestoreGState(ctx);
-}
-
-UIImage *LRLinenImage(CGSize size) {
-    NSString *key = [NSString stringWithFormat:@"linen.%@.%.0fx%.0f", LRSkinKey(), size.width, size.height];
-    UIImage *img = LRCached(key);
+UIImage *LRVignetteImage(void) {
+    UIImage *img = LRCached(@"tile.vignette");
     if (img) return img;
-    img = LRImageWithSize(size, YES, ^(CGContextRef ctx, CGRect rect) { LRDrawLinen(ctx, rect); });
-    LRCache(key, img);
+    UIGraphicsBeginImageContextWithOptions(CGSizeMake(256, 256), NO, 1);
+    CGContextRef ctx = UIGraphicsGetCurrentContext();
+    CGFloat locs[3] = { 0, 0.45f, 1 };
+    CGGradientRef g = LRCreateGradient([NSArray arrayWithObjects:W(1, 0.06f), W(0, 0), W(0, 0.55f), nil], locs);
+    CGContextDrawRadialGradient(ctx, g, CGPointMake(128, 128), 0, CGPointMake(128, 128), 128,
+                                kCGGradientDrawsAfterEndLocation);
+    CGGradientRelease(g);
+    img = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    LRCache(@"tile.vignette", img);
     return img;
 }
 
-void LRDrawWalnut(CGContextRef ctx, CGRect r) {
-    LRSkin *s = SKIN;
-    if (s->flat) {
-        [s->background setFill];
-        CGContextFillRect(ctx, r);
-        return;
-    }
-    CGContextSaveGState(ctx);
-    CGContextClipToRect(ctx, r);
-    LRFillLinear(ctx, r.origin, CGPointMake(CGRectGetMaxX(r), r.origin.y),
-                 [NSArray arrayWithObjects:s->walnutDark, s->walnut,
-                  LRColorMix(s->walnut, [UIColor blackColor], 0.15f), s->walnutDark, nil], NULL);
-    LRSeed(2718);
-    for (int i = 0; i < 260; ++i) {
-        CGFloat x = CGRectGetMinX(r) + LRRand() * r.size.width;
-        CGFloat wob = 3 + LRRand() * 9;
-        CGContextSetRGBStrokeColor(ctx, 0.08f, 0.04f, 0.01f, 0.05f + LRRand() * 0.10f);
-        CGContextSetLineWidth(ctx, 0.4f + LRRand() * 1.6f);
-        CGContextMoveToPoint(ctx, x, CGRectGetMinY(r));
-        CGFloat y0 = CGRectGetMinY(r), h = r.size.height;
-        CGContextAddCurveToPoint(ctx, x + wob, y0 + h * 0.3f, x - wob, y0 + h * 0.65f,
-                                 x + wob * 0.5f, y0 + h);
-        CGContextStrokePath(ctx);
-    }
-    LRDrawNoise(ctx, r, 0.10f);
-    CGContextRestoreGState(ctx);
+UIColor *LRPinstripeColor(void) {
+    UIColor *c = LRCached(@"tile.pinstripe");
+    if (c) return c;
+    /* five points of the base grey and two of a lighter one, repeated */
+    UIImage *tile = LRImageWithSize(CGSizeMake(7, 1), YES, ^(CGContextRef ctx, CGRect rect) {
+        CGContextSetRGBFillColor(ctx, 0xC5 / 255.0f, 0xCC / 255.0f, 0xD4 / 255.0f, 1);
+        CGContextFillRect(ctx, rect);
+        CGContextSetRGBFillColor(ctx, 0xCB / 255.0f, 0xD2 / 255.0f, 0xD8 / 255.0f, 1);
+        CGContextFillRect(ctx, CGRectMake(5, 0, 2, 1));
+    });
+    c = [UIColor colorWithPatternImage:tile];
+    LRCache(@"tile.pinstripe", c);
+    return c;
 }
 
-void LRDrawStitching(CGContextRef ctx, CGRect r, CGFloat radius, CGFloat inset, UIColor *thread) {
+#pragma mark thread
+
+/* the shadow pass sits 0.8 lower and a little wider, like the holes the
+   needle left; then the thread itself */
+static void LRStitchPasses(CGContextRef ctx, void (^path)(CGFloat dy), CGFloat on, CGFloat off) {
     if (SKIN->flat) return;
-    CGRect s = CGRectInset(r, inset, inset);
-    CGFloat dash[2] = { 5, 3 };
-    CGContextSaveGState(ctx);
-    CGContextSetLineDash(ctx, 0, dash, 2);
-    LRAddRoundRect(ctx, CGRectOffset(s, 0, 1), radius);
-    CGContextSetRGBStrokeColor(ctx, 0, 0, 0, 0.4f);
-    CGContextSetLineWidth(ctx, 2.2f);
-    CGContextStrokePath(ctx);
-    LRAddRoundRect(ctx, s, radius);
-    [thread setStroke];
-    CGContextSetLineWidth(ctx, 1.5f);
-    CGContextStrokePath(ctx);
-    CGContextRestoreGState(ctx);
-}
-
-#pragma mark hardware
-
-void LRDrawScrew(CGContextRef ctx, CGPoint c, CGFloat r, CGFloat angle) {
-    if (SKIN->flat) return;
-    CGContextSaveGState(ctx);
-    CGRect disc = CGRectMake(c.x - r, c.y - r, r * 2, r * 2);
-    /* the countersink */
-    CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.25f);
-    CGContextFillEllipseInRect(ctx, CGRectInset(disc, -1, -1));
-    CGContextAddEllipseInRect(ctx, disc);
-    CGContextClip(ctx);
-    LRFillRadial(ctx, CGPointMake(c.x - r * 0.35f, c.y - r * 0.35f), r * 0.1f, r * 1.6f,
-                 [UIColor colorWithWhite:0.97f alpha:1], [UIColor colorWithWhite:0.50f alpha:1]);
-    CGContextRestoreGState(ctx);
-    CGContextSaveGState(ctx);
-    CGContextSetRGBStrokeColor(ctx, 0, 0, 0, 0.5f);
-    CGContextSetLineWidth(ctx, 0.7f);
-    CGContextStrokeEllipseInRect(ctx, disc);
-    CGFloat dx = cosf(angle) * r * 0.72f, dy = sinf(angle) * r * 0.72f;
-    CGContextSetLineCap(ctx, kCGLineCapButt);
-    CGContextSetLineWidth(ctx, MAX(1.0f, r * 0.34f));
-    CGContextSetRGBStrokeColor(ctx, 1, 1, 1, 0.6f);
-    CGContextMoveToPoint(ctx, c.x - dx, c.y - dy + 0.6f);
-    CGContextAddLineToPoint(ctx, c.x + dx, c.y + dy + 0.6f);
-    CGContextStrokePath(ctx);
-    CGContextSetRGBStrokeColor(ctx, 0.22f, 0.23f, 0.25f, 0.95f);
-    CGContextMoveToPoint(ctx, c.x - dx, c.y - dy);
-    CGContextAddLineToPoint(ctx, c.x + dx, c.y + dy);
-    CGContextStrokePath(ctx);
-    CGContextRestoreGState(ctx);
-}
-
-void LRDrawInsetWell(CGContextRef ctx, CGRect r, CGFloat radius, UIColor *top, UIColor *bottom,
-                     CGFloat depth) {
-    if (SKIN->flat) {
-        /* a flat well is a filled card with a hairline */
+    CGFloat dash[2] = { on, off };
+    for (int pass = 0; pass < 2; ++pass) {
         CGContextSaveGState(ctx);
-        LRAddRoundRect(ctx, r, radius);
-        [bottom setFill];
-        CGContextFillPath(ctx);
-        LRAddRoundRect(ctx, CGRectInset(r, 0.25f, 0.25f), radius);
-        [SKIN->separator setStroke];
-        CGContextSetLineWidth(ctx, LRHairline());
+        CGContextSetLineDash(ctx, 0, dash, 2);
+        CGContextSetLineCap(ctx, kCGLineCapButt);
+        if (pass == 0) {
+            CGContextSetRGBStrokeColor(ctx, 0, 0, 0, 0.55f);
+            CGContextSetLineWidth(ctx, 1.9f);
+        } else {
+            [SKIN->stitch setStroke];
+            CGContextSetLineWidth(ctx, 1.3f);
+        }
+        CGContextBeginPath(ctx);
+        path(pass == 0 ? 0.8f : 0);
         CGContextStrokePath(ctx);
         CGContextRestoreGState(ctx);
+    }
+}
+
+void LRDrawStitchLine(CGContextRef ctx, CGPoint a, CGPoint b) {
+    LRStitchPasses(ctx, ^(CGFloat dy) {
+        CGContextMoveToPoint(ctx, a.x, a.y + dy);
+        CGContextAddLineToPoint(ctx, b.x, b.y + dy);
+    }, 4.0f, 2.5f);
+}
+
+void LRDrawStitchCircle(CGContextRef ctx, CGPoint c, CGFloat radius) {
+    /* a whole number of stitches round the circle, so the seam closes */
+    CGFloat circ = (CGFloat)M_PI * 2 * radius;
+    CGFloat n = MAX(8.0f, roundf(circ / 6.5f));
+    CGFloat on = circ / n * 0.64f, off = circ / n - on;
+    LRStitchPasses(ctx, ^(CGFloat dy) {
+        CGContextAddEllipseInRect(ctx, CGRectMake(c.x - radius, c.y - radius + dy, radius * 2, radius * 2));
+    }, on, off);
+}
+
+void LRDrawStitchRoundRect(CGContextRef ctx, CGRect r, CGFloat radius) {
+    LRStitchPasses(ctx, ^(CGFloat dy) {
+        LRAddRoundRect(ctx, CGRectOffset(r, 0, dy), radius);
+    }, 4.0f, 2.5f);
+}
+
+#pragma mark chrome
+
+void LRDrawBar(CGContextRef ctx, CGRect r) {
+    LRSkin *s = SKIN;
+    if (s->flat) {
+        CGContextSetRGBFillColor(ctx, 0.97f, 0.97f, 0.97f, 1);
+        CGContextFillRect(ctx, r);
+        [s->separator setFill];
+        CGContextFillRect(ctx, CGRectMake(r.origin.x, CGRectGetMaxY(r) - LRHairline(), r.size.width, LRHairline()));
         return;
     }
+    LRDrawDenim(ctx, r, 0);
     CGContextSaveGState(ctx);
-    /* light lip below, dark rim around */
-    LRAddRoundRect(ctx, CGRectMake(r.origin.x - 1, r.origin.y - 1, r.size.width + 2, r.size.height + 3),
-                   radius + 1);
-    CGContextSetRGBFillColor(ctx, 1, 1, 1, (SKIN->night ? 0.10f : 0.40f) * depth);
-    CGContextFillPath(ctx);
-    LRAddRoundRect(ctx, CGRectInset(r, -1, -1), radius + 1);
-    CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.6f * depth);
-    CGContextFillPath(ctx);
-    LRAddRoundRect(ctx, r, radius);
-    CGContextClip(ctx);
-    LRFillVertical(ctx, r, top, bottom);
-    /* inner shadow along the top edge */
-    CGFloat sh = MIN(12.0f, r.size.height * 0.3f);
-    LRFillVertical(ctx, CGRectMake(r.origin.x, r.origin.y, r.size.width, sh),
-                   [UIColor colorWithWhite:0 alpha:0.55f * depth], [UIColor colorWithWhite:0 alpha:0]);
+    CGContextClipToRect(ctx, r);
+    CGFloat locs[4] = { 0, 0.5f, 0.5f, 1 };
+    LRFillLinear(ctx, CGPointMake(0, CGRectGetMinY(r)), CGPointMake(0, CGRectGetMaxY(r)),
+                 [NSArray arrayWithObjects:W(1, 0.13f), W(1, 0.05f), W(1, 0), W(0, 0.12f), nil], locs);
     CGContextRestoreGState(ctx);
+    CGContextSetRGBFillColor(ctx, 1, 1, 1, 0.16f);
+    CGContextFillRect(ctx, CGRectMake(r.origin.x, r.origin.y, r.size.width, 1));
+    CGFloat seam = CGRectGetMaxY(r) - 4.5f;
+    LRDrawStitchLine(ctx, CGPointMake(r.origin.x, seam), CGPointMake(CGRectGetMaxX(r), seam));
+    CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.85f);
+    CGContextFillRect(ctx, CGRectMake(r.origin.x, CGRectGetMaxY(r) - 1, r.size.width, 1));
 }
 
-void LRDrawBezel(CGContextRef ctx, CGRect r, CGFloat radius) {
-    if (SKIN->flat) return;
-    CGContextSaveGState(ctx);
-    LRAddRoundRect(ctx, CGRectOffset(r, 0, 1), radius);
-    CGContextSetRGBFillColor(ctx, 1, 1, 1, SKIN->night ? 0.08f : 0.45f);
-    CGContextFillPath(ctx);
-    LRAddRoundRect(ctx, r, radius);
-    CGContextClip(ctx);
-    LRFillVertical(ctx, r, [UIColor colorWithRed:0.10f green:0.10f blue:0.11f alpha:1],
-                   [UIColor colorWithRed:0.27f green:0.28f blue:0.30f alpha:1]);
-    CGContextRestoreGState(ctx);
-}
+#pragma mark grouped rows
 
-void LRDrawGloss(CGContextRef ctx, CGRect r, CGFloat radius) {
-    if (SKIN->flat) return;
-    CGContextSaveGState(ctx);
-    LRAddRoundRect(ctx, r, radius);
-    CGContextClip(ctx);
-    CGFloat x = r.origin.x, y = r.origin.y, w = r.size.width, h = r.size.height;
-    CGContextMoveToPoint(ctx, x, y);
-    CGContextAddLineToPoint(ctx, x + w, y);
-    CGContextAddLineToPoint(ctx, x + w, y + h * 0.20f);
-    CGContextAddCurveToPoint(ctx, x + w * 0.62f, y + h * 0.40f, x + w * 0.30f, y + h * 0.30f,
-                             x, y + h * 0.46f);
-    CGContextClosePath(ctx);
-    CGContextClip(ctx);
-    LRFillVertical(ctx, CGRectMake(x, y, w, h * 0.5f), [UIColor colorWithWhite:1 alpha:0.16f],
-                   [UIColor colorWithWhite:1 alpha:0.02f]);
-    CGContextRestoreGState(ctx);
-}
-
-void LRDrawLED(CGContextRef ctx, CGPoint c, CGFloat r, UIColor *color, BOOL on) {
-    CGRect disc = CGRectMake(c.x - r, c.y - r, r * 2, r * 2);
-    if (SKIN->flat) {
-        [(on ? color : [UIColor colorWithWhite:0.78f alpha:1]) setFill];
-        CGContextFillEllipseInRect(ctx, disc);
-        return;
-    }
-    CGContextSaveGState(ctx);
-    CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.45f);
-    CGContextFillEllipseInRect(ctx, CGRectInset(disc, -1.2f, -1.2f));
-    if (on) {
-        CGContextSetShadowWithColor(ctx, CGSizeZero, r * 2.2f, color.CGColor);
-        [color setFill];
-        CGContextFillEllipseInRect(ctx, disc);
-        CGContextSetShadowWithColor(ctx, CGSizeZero, 0, NULL);
-        CGContextAddEllipseInRect(ctx, disc);
-        CGContextClip(ctx);
-        LRFillRadial(ctx, CGPointMake(c.x - r * 0.3f, c.y - r * 0.35f), 0, r * 1.3f,
-                     LRColorMix(color, [UIColor whiteColor], 0.75f), LRColorAlpha(color, 0));
+void LRAddCellPath(CGContextRef ctx, CGRect r, LRPlatePosition position, CGFloat radius) {
+    BOOL top = position == LRPlateSingle || position == LRPlateTop;
+    BOOL bottom = position == LRPlateSingle || position == LRPlateBottom;
+    CGFloat minx = CGRectGetMinX(r), maxx = CGRectGetMaxX(r), midx = CGRectGetMidX(r);
+    CGFloat miny = CGRectGetMinY(r), maxy = CGRectGetMaxY(r);
+    radius = MIN(radius, r.size.height / 2);
+    CGContextMoveToPoint(ctx, minx, top ? miny + radius : miny);
+    if (top) {
+        CGContextAddArcToPoint(ctx, minx, miny, midx, miny, radius);
+        CGContextAddArcToPoint(ctx, maxx, miny, maxx, miny + radius, radius);
     } else {
-        [LRColorMix(color, [UIColor blackColor], 0.72f) setFill];
-        CGContextFillEllipseInRect(ctx, disc);
-        CGContextAddEllipseInRect(ctx, disc);
-        CGContextClip(ctx);
-        LRFillRadial(ctx, CGPointMake(c.x - r * 0.3f, c.y - r * 0.35f), 0, r,
-                     [UIColor colorWithWhite:1 alpha:0.35f], [UIColor colorWithWhite:1 alpha:0]);
+        CGContextAddLineToPoint(ctx, maxx, miny);
     }
-    CGContextRestoreGState(ctx);
+    if (bottom) {
+        CGContextAddArcToPoint(ctx, maxx, maxy, midx, maxy, radius);
+        CGContextAddArcToPoint(ctx, minx, maxy, minx, maxy - radius, radius);
+    } else {
+        CGContextAddLineToPoint(ctx, maxx, maxy);
+        CGContextAddLineToPoint(ctx, minx, maxy);
+    }
+    CGContextClosePath(ctx);
 }
 
-void LRDrawPaperCard(CGContextRef ctx, CGRect r, CGFloat radius) {
+/* the grey rim: the sides always, the top on a first row, the bottom on a
+   last one; rows in between are divided by a lighter line */
+static void LRAddCellRim(CGContextRef ctx, CGRect r, LRPlatePosition position, CGFloat radius) {
+    CGFloat minx = CGRectGetMinX(r), maxx = CGRectGetMaxX(r), midx = CGRectGetMidX(r);
+    CGFloat miny = CGRectGetMinY(r), maxy = CGRectGetMaxY(r);
+    radius = MIN(radius, r.size.height / 2);
+    switch (position) {
+        case LRPlateSingle:
+            LRAddRoundRect(ctx, r, radius);
+            break;
+        case LRPlateTop:
+            CGContextMoveToPoint(ctx, minx, maxy);
+            CGContextAddArcToPoint(ctx, minx, miny, midx, miny, radius);
+            CGContextAddArcToPoint(ctx, maxx, miny, maxx, maxy, radius);
+            CGContextAddLineToPoint(ctx, maxx, maxy);
+            break;
+        case LRPlateMiddle:
+            CGContextMoveToPoint(ctx, minx, miny);
+            CGContextAddLineToPoint(ctx, minx, maxy);
+            CGContextMoveToPoint(ctx, maxx, miny);
+            CGContextAddLineToPoint(ctx, maxx, maxy);
+            break;
+        case LRPlateBottom:
+            CGContextMoveToPoint(ctx, minx, miny);
+            CGContextAddArcToPoint(ctx, minx, maxy, midx, maxy, radius);
+            CGContextAddArcToPoint(ctx, maxx, maxy, maxx, miny, radius);
+            CGContextAddLineToPoint(ctx, maxx, miny);
+            break;
+    }
+}
+
+void LRDrawGroupCell(CGContextRef ctx, CGRect r, LRPlatePosition position, BOOL pressed, BOOL onDark) {
     LRSkin *s = SKIN;
-    if (s->flat) {
-        [s->cardTop setFill];
-        CGContextFillRect(ctx, r);
-        return;
-    }
+    const CGFloat radius = 10;
+    BOOL bottom = position == LRPlateSingle || position == LRPlateBottom;
     CGContextSaveGState(ctx);
-    LRAddRoundRect(ctx, CGRectOffset(r, 0, 2), radius);
-    CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.38f);
-    CGContextFillPath(ctx);
-    LRAddRoundRect(ctx, r, radius);
-    CGContextClip(ctx);
-    LRFillVertical(ctx, r, s->cardTop, s->cardBottom);
-    LRDrawNoise(ctx, r, s->night ? 0.10f : 0.07f);
-    CGContextRestoreGState(ctx);
-    CGContextSaveGState(ctx);
-    LRAddRoundRect(ctx, CGRectInset(r, 0.5f, 0.5f), radius);
-    [s->cardEdge setStroke];
-    CGContextSetLineWidth(ctx, 1);
-    CGContextStrokePath(ctx);
-    CGContextRestoreGState(ctx);
-}
-
-void LRDrawBrassPlate(CGContextRef ctx, CGRect r, CGFloat radius) {
-    LRSkin *s = SKIN;
-    if (s->flat) {
-        [s->brassTop setFill];
-        CGContextFillRect(ctx, r);
-        return;
-    }
-    CGContextSaveGState(ctx);
-    LRAddRoundRect(ctx, CGRectOffset(r, 0, 1.5f), radius);
-    CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.5f);
-    CGContextFillPath(ctx);
-    LRAddRoundRect(ctx, r, radius);
-    CGContextClip(ctx);
-    CGFloat locs[3] = { 0, 0.5f, 1 };
-    LRFillLinear(ctx, r.origin, CGPointMake(r.origin.x, CGRectGetMaxY(r)),
-                 [NSArray arrayWithObjects:s->brassTop, LRColorMix(s->brassTop, s->brassBottom, 0.55f),
-                  s->brassBottom, nil], locs);
-    LRDrawBrushedMetal(ctx, r, nil, nil, [UIColor colorWithWhite:1 alpha:0.14f],
-                       [UIColor colorWithRed:0.3f green:0.2f blue:0 alpha:0.12f],
-                       (unsigned)(r.size.width * 7 + r.size.height));
-    CGContextRestoreGState(ctx);
-    CGContextSaveGState(ctx);
-    LRAddRoundRect(ctx, CGRectInset(r, 0.5f, 0.5f), radius);
-    [s->brassShine setStroke];
-    CGContextSetLineWidth(ctx, 1);
-    CGContextStrokePath(ctx);
-    CGContextRestoreGState(ctx);
-    LRDrawScrew(ctx, CGPointMake(r.origin.x + 9, CGRectGetMidY(r)), 3.2f, 0.6f);
-    LRDrawScrew(ctx, CGPointMake(CGRectGetMaxX(r) - 9, CGRectGetMidY(r)), 3.2f, 2.1f);
-}
-
-void LRDrawSeekGlyph(CGContextRef ctx, CGPoint c, CGFloat size, int direction, UIColor *color) {
-    CGFloat d = direction < 0 ? -1 : 1;
-    [color setFill];
-    for (int k = -1; k <= 1; k += 2) {
-        CGFloat ox = c.x + k * size * 0.45f;
-        CGContextMoveToPoint(ctx, ox - size * 0.45f * d, c.y - size * 0.55f);
-        CGContextAddLineToPoint(ctx, ox + size * 0.45f * d, c.y);
-        CGContextAddLineToPoint(ctx, ox - size * 0.45f * d, c.y + size * 0.55f);
-        CGContextClosePath(ctx);
+    if (bottom && !onDark) {
+        /* the white lip the last row leaves on the pinstripes */
+        LRAddCellPath(ctx, CGRectOffset(CGRectMake(r.origin.x, r.origin.y, r.size.width, r.size.height - 1), 0, 1),
+                      position, radius);
+        CGContextSetRGBFillColor(ctx, 1, 1, 1, 0.8f);
         CGContextFillPath(ctx);
     }
+    CGRect body = r;
+    if (bottom) body.size.height -= 1;
+    CGContextSaveGState(ctx);
+    LRAddCellPath(ctx, body, position, radius);
+    CGContextClip(ctx);
+    if (pressed) LRFillVertical(ctx, body, s->groupPressed, s->groupPressedBottom);
+    else if (onDark) LRFillVertical(ctx, body, W(0.992f, 1), W(0.929f, 1));
+    else LRFillVertical(ctx, body, s->groupTop, s->groupBottom);
+    if (!bottom && !pressed) {
+        [s->groupLine setFill];
+        CGContextFillRect(ctx, CGRectMake(body.origin.x, CGRectGetMaxY(body) - 1, body.size.width, 1));
+    }
+    CGContextRestoreGState(ctx);
+    CGContextBeginPath(ctx);
+    LRAddCellRim(ctx, CGRectInset(body, 0.5f, position == LRPlateMiddle ? 0 : 0.5f), position, radius - 0.5f);
+    if (onDark) CGContextSetRGBStrokeColor(ctx, 0, 0, 0, 0.75f);
+    else [s->groupEdge setStroke];
+    CGContextSetLineWidth(ctx, 1);
+    CGContextStrokePath(ctx);
+    CGContextRestoreGState(ctx);
 }
 
 void LRDrawChevron(CGContextRef ctx, CGPoint c, CGFloat size, BOOL down, UIColor *color, CGFloat width) {
     CGContextSaveGState(ctx);
     [color setStroke];
     CGContextSetLineWidth(ctx, width);
-    CGContextSetLineCap(ctx, kCGLineCapRound);
-    CGContextSetLineJoin(ctx, kCGLineJoinRound);
+    CGContextSetLineCap(ctx, kCGLineCapSquare);
+    CGContextSetLineJoin(ctx, kCGLineJoinMiter);
     if (down) {
         CGContextMoveToPoint(ctx, c.x - size, c.y - size * 0.5f);
         CGContextAddLineToPoint(ctx, c.x, c.y + size * 0.5f);
@@ -599,6 +365,89 @@ void LRDrawChevron(CGContextRef ctx, CGPoint c, CGFloat size, BOOL down, UIColor
     }
     CGContextStrokePath(ctx);
     CGContextRestoreGState(ctx);
+}
+
+void LRDrawCheckmark(CGContextRef ctx, CGPoint p, UIColor *color) {
+    CGContextSaveGState(ctx);
+    [color setStroke];
+    CGContextSetLineWidth(ctx, SKIN->flat ? 2 : 2.8f);
+    CGContextSetLineCap(ctx, kCGLineCapRound);
+    CGContextSetLineJoin(ctx, kCGLineJoinRound);
+    CGContextMoveToPoint(ctx, p.x, p.y);
+    CGContextAddLineToPoint(ctx, p.x + 4.5f, p.y + 5);
+    CGContextAddLineToPoint(ctx, p.x + 13, p.y - 7);
+    CGContextStrokePath(ctx);
+    CGContextRestoreGState(ctx);
+}
+
+UIImage *LRDetailDisclosureImage(BOOL pressed) {
+    NSString *key = [NSString stringWithFormat:@"disclosure.%d.%d", pressed, SKIN->flat];
+    UIImage *img = LRCached(key);
+    if (img) return img;
+    BOOL flat = SKIN->flat;
+    UIColor *tint = SKIN->tint;
+    img = LRImageWithSize(CGSizeMake(29, 29), NO, ^(CGContextRef ctx, CGRect rect) {
+        CGPoint c = CGPointMake(14.5f, 14.5f);
+        CGFloat r = 10.5f;
+        CGRect disc = CGRectMake(c.x - r, c.y - r, r * 2, r * 2);
+        if (flat) {
+            /* the ios 7 (i): a thin ring and a letter */
+            [(pressed ? LRColorAlpha(tint, 0.3f) : tint) setStroke];
+            CGContextSetLineWidth(ctx, 1);
+            CGContextStrokeEllipseInRect(ctx, CGRectInset(disc, 0.5f, 0.5f));
+            [(pressed ? LRColorAlpha(tint, 0.3f) : tint) setFill];
+            CGContextFillEllipseInRect(ctx, CGRectMake(c.x - 1.2f, c.y - 6.5f, 2.4f, 2.4f));
+            CGContextFillRect(ctx, CGRectMake(c.x - 1, c.y - 2.5f, 2, 8));
+            return;
+        }
+        CGContextSetRGBFillColor(ctx, 1, 1, 1, 0.9f);
+        CGContextFillEllipseInRect(ctx, CGRectOffset(disc, 0, 1));
+        CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.35f);
+        CGContextFillEllipseInRect(ctx, disc);
+        CGRect inner = CGRectInset(disc, 1, 1);
+        CGContextSaveGState(ctx);
+        CGContextAddEllipseInRect(ctx, inner);
+        CGContextClip(ctx);
+        CGFloat locs[3] = { 0, 0.5f, 1 };
+        NSArray *colors = pressed
+            ? [NSArray arrayWithObjects:[UIColor colorWithRed:0.20f green:0.43f blue:0.78f alpha:1],
+               [UIColor colorWithRed:0.10f green:0.33f blue:0.70f alpha:1],
+               [UIColor colorWithRed:0.05f green:0.24f blue:0.60f alpha:1], nil]
+            : [NSArray arrayWithObjects:[UIColor colorWithRed:0.365f green:0.612f blue:0.957f alpha:1],
+               [UIColor colorWithRed:0.165f green:0.463f blue:0.890f alpha:1],
+               [UIColor colorWithRed:0.078f green:0.349f blue:0.812f alpha:1], nil];
+        LRFillLinear(ctx, CGPointMake(0, inner.origin.y), CGPointMake(0, CGRectGetMaxY(inner)), colors, locs);
+        CGContextSetRGBFillColor(ctx, 1, 1, 1, 0.22f);
+        CGContextFillEllipseInRect(ctx, CGRectMake(c.x - r * 1.05f, c.y - r * 0.9f - r * 1.05f, r * 2.1f, r * 2.1f));
+        CGContextRestoreGState(ctx);
+        CGContextSetRGBStrokeColor(ctx, 1, 1, 1, 0.9f);
+        CGContextSetLineWidth(ctx, 2);
+        CGContextStrokeEllipseInRect(ctx, inner);
+        LRDrawChevron(ctx, CGPointMake(c.x + 0.8f, c.y), 3.6f, NO, [UIColor whiteColor], 2.6f);
+    });
+    LRCache(key, img);
+    return img;
+}
+
+void LRDrawLED(CGContextRef ctx, CGPoint c, CGFloat r, UIColor *color, BOOL on) {
+    CGRect disc = CGRectMake(c.x - r, c.y - r, r * 2, r * 2);
+    if (SKIN->flat) {
+        [(on ? color : W(0.78f, 1)) setFill];
+        CGContextFillEllipseInRect(ctx, disc);
+        return;
+    }
+    CGContextSaveGState(ctx);
+    CGContextSetRGBFillColor(ctx, 1, 1, 1, 0.6f);
+    CGContextFillEllipseInRect(ctx, CGRectOffset(disc, 0, 0.8f));
+    [(on ? color : W(0.72f, 1)) setFill];
+    CGContextFillEllipseInRect(ctx, disc);
+    CGContextAddEllipseInRect(ctx, disc);
+    CGContextClip(ctx);
+    LRFillRadial(ctx, CGPointMake(c.x - r * 0.3f, c.y - r * 0.4f), 0, r * 1.2f, W(1, 0.6f), W(1, 0));
+    CGContextRestoreGState(ctx);
+    CGContextSetRGBStrokeColor(ctx, 0, 0, 0, 0.3f);
+    CGContextSetLineWidth(ctx, 0.8f);
+    CGContextStrokeEllipseInRect(ctx, CGRectInset(disc, 0.4f, 0.4f));
 }
 
 #pragma mark text
@@ -615,149 +464,11 @@ void LRDrawEngraved(NSString *text, CGRect rect, UIFont *font, NSTextAlignment a
     [text drawInRect:rect withFont:font lineBreakMode:NSLineBreakByTruncatingTail alignment:align];
 }
 
-CGFloat LRTrackedWidth(NSString *text, UIFont *font, CGFloat tracking) {
-    CGFloat w = 0;
-    NSUInteger n = [text length];
-    for (NSUInteger i = 0; i < n; ++i)
-        w += [[text substringWithRange:NSMakeRange(i, 1)] sizeWithFont:font].width;
-    return w + tracking * (n > 0 ? n - 1 : 0);
-}
-
-CGFloat LRDrawTracked(NSString *text, CGFloat x, CGFloat y, UIFont *font, CGFloat tracking,
-                      NSTextAlignment align, UIColor *color, UIColor *shadow, CGFloat dy) {
-    CGFloat width = LRTrackedWidth(text, font, tracking);
-    if (align == NSTextAlignmentCenter) x -= width / 2;
-    else if (align == NSTextAlignmentRight) x -= width;
-    for (int pass = shadow ? 0 : 1; pass < 2; ++pass) {
-        [(pass == 0 ? shadow : color) set];
-        CGFloat cx = x;
-        for (NSUInteger i = 0; i < [text length]; ++i) {
-            NSString *ch = [text substringWithRange:NSMakeRange(i, 1)];
-            [ch drawAtPoint:CGPointMake(cx, y + (pass == 0 ? dy : 0)) withFont:font];
-            cx += [ch sizeWithFont:font].width + tracking;
-        }
-    }
-    return width;
-}
-
-void LRDrawGlowText(CGContextRef ctx, NSString *text, CGRect rect, UIFont *font, UIColor *color,
-                    NSTextAlignment align, CGFloat blur) {
-    if (![text length]) return;
-    if (SKIN->flat) {
-        [color set];
-        [text drawInRect:rect withFont:font lineBreakMode:NSLineBreakByTruncatingTail alignment:align];
-        return;
-    }
-    CGContextSaveGState(ctx);
-    CGContextSetShadowWithColor(ctx, CGSizeZero, blur, color.CGColor);
-    [LRColorMix(color, [UIColor whiteColor], 0.35f) set];
-    [text drawInRect:rect withFont:font lineBreakMode:NSLineBreakByTruncatingTail alignment:align];
-    CGContextRestoreGState(ctx);
-}
-
-/* segment polygons for a digit cell of height h, as in the prototype */
-static void LRSegmentPath(CGContextRef ctx, char seg, CGFloat ox, CGFloat oy, CGFloat h) {
-    CGFloat w = h * 0.55f, th = h * 0.13f, slant = h * 0.08f, half = h / 2;
-    CGFloat pts[6][2];
-    int n = 0;
-#define P(X, Y) do { pts[n][0] = (X); pts[n][1] = (Y); ++n; } while (0)
-    switch (seg) {
-        case 'a': P(th * .6f, 0); P(w - th * .6f, 0); P(w - th * 1.5f, th); P(th * 1.5f, th); break;
-        case 'd': P(th * 1.5f, h - th); P(w - th * 1.5f, h - th); P(w - th * .6f, h); P(th * .6f, h); break;
-        case 'g': P(th, half); P(th * 1.7f, half - th / 2); P(w - th * 1.7f, half - th / 2); P(w - th, half);
-                  P(w - th * 1.7f, half + th / 2); P(th * 1.7f, half + th / 2); break;
-        case 'f': P(0, th * .6f); P(th, th * 1.5f); P(th, half - th * .7f); P(th * .5f, half - th * .2f);
-                  P(0, half - th * .6f); break;
-        case 'e': P(0, half + th * .6f); P(th * .5f, half + th * .2f); P(th, half + th * .7f);
-                  P(th, h - th * 1.5f); P(0, h - th * .6f); break;
-        case 'b': P(w, th * .6f); P(w, half - th * .6f); P(w - th * .5f, half - th * .2f);
-                  P(w - th, half - th * .7f); P(w - th, th * 1.5f); break;
-        case 'c': P(w, half + th * .6f); P(w, h - th * .6f); P(w - th, h - th * 1.5f);
-                  P(w - th, half + th * .7f); P(w - th * .5f, half + th * .2f); break;
-    }
-#undef P
-    for (int i = 0; i < n; ++i) {
-        CGFloat px = ox + pts[i][0] + slant * (1 - pts[i][1] / h);
-        CGFloat py = oy + pts[i][1];
-        if (i == 0) CGContextMoveToPoint(ctx, px, py);
-        else CGContextAddLineToPoint(ctx, px, py);
-    }
-    CGContextClosePath(ctx);
-}
-
-static const char *LRSegmentsFor(unichar ch) {
-    switch (ch) {
-        case '0': return "abcdef"; case '1': return "bc"; case '2': return "abged";
-        case '3': return "abgcd"; case '4': return "fgbc"; case '5': return "afgcd";
-        case '6': return "afgedc"; case '7': return "abc"; case '8': return "abcdefg";
-        case '9': return "abcdfg"; case '-': return "g";
-    }
-    return "";
-}
-
-/* the flat skin shows the clock in thin figures instead of segments */
-static UIFont *LRFlatClockFont(CGFloat h) {
-    return [LRSkin lightFont:h * 1.3f];
-}
-
-CGFloat LRSevenSegmentWidth(NSString *text, CGFloat h) {
-    if (SKIN->flat) return [text sizeWithFont:LRFlatClockFont(h)].width;
-    CGFloat w = 0, th = h * 0.13f;
-    for (NSUInteger i = 0; i < [text length]; ++i)
-        w += [text characterAtIndex:i] == ':' ? th * 2.2f : h * 0.55f + th * 0.9f;
-    return w;
-}
-
-CGFloat LRDrawSevenSegment(CGContextRef ctx, NSString *text, CGPoint o, CGFloat h,
-                           UIColor *on, UIColor *off) {
-    if (SKIN->flat) {
-        UIFont *f = LRFlatClockFont(h);
-        [on set];
-        /* baseline on the bottom of the segment box */
-        CGSize size = [text drawAtPoint:CGPointMake(o.x, o.y + h - f.ascender) withFont:f];
-        return size.width;
-    }
-    CGFloat th = h * 0.13f, slant = h * 0.08f, x = o.x;
-    CGContextSaveGState(ctx);
-    for (NSUInteger i = 0; i < [text length]; ++i) {
-        unichar ch = [text characterAtIndex:i];
-        if (ch == ':') {
-            CGContextSetShadowWithColor(ctx, CGSizeZero, th * 1.5f, on.CGColor);
-            [on setFill];
-            CGFloat ys[2] = { h * 0.32f, h * 0.72f };
-            for (int k = 0; k < 2; ++k) {
-                CGFloat cx = x + th * 0.9f + slant * (1 - ys[k] / h);
-                CGContextFillEllipseInRect(ctx, CGRectMake(cx - th * 0.55f, o.y + ys[k] - th * 0.55f,
-                                                           th * 1.1f, th * 1.1f));
-            }
-            x += th * 2.2f;
-            continue;
-        }
-        const char *lit = LRSegmentsFor(ch);
-        const char *all = "abcdefg";
-        for (int k = 0; k < 7; ++k) {
-            BOOL isOn = strchr(lit, all[k]) != NULL;
-            LRSegmentPath(ctx, all[k], x, o.y, h);
-            if (isOn) {
-                CGContextSetShadowWithColor(ctx, CGSizeZero, th * 1.6f, on.CGColor);
-                [on setFill];
-            } else {
-                CGContextSetShadowWithColor(ctx, CGSizeZero, 0, NULL);
-                [off setFill];
-            }
-            CGContextFillPath(ctx);
-        }
-        x += h * 0.55f + th * 0.9f;
-    }
-    CGContextRestoreGState(ctx);
-    return x - o.x;
-}
-
 #pragma mark flags
 
 UIImage *LRFlagImage(NSString *code) {
     if ([code length] != 2) return nil;
-    NSString *key = [@"flag." stringByAppendingString:code];
+    NSString *key = [@"tile.flag." stringByAppendingString:code];
     UIImage *img = LRCached(key);
     if (img) return img;
     NSString *path = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:
@@ -767,10 +478,8 @@ UIImage *LRFlagImage(NSString *code) {
     return img;
 }
 
-/* an enamel pin: the flag in a round badge with a metal rim and a highlight */
-void LRDrawFlag(CGContextRef ctx, NSString *code, CGRect rect) {
+void LRDrawFlag(CGContextRef ctx, NSString *code, CGRect disc) {
     UIImage *img = LRFlagImage(code);
-    CGRect disc = rect;
     if (SKIN->flat) {
         CGContextSaveGState(ctx);
         CGContextAddEllipseInRect(ctx, disc);
@@ -778,28 +487,23 @@ void LRDrawFlag(CGContextRef ctx, NSString *code, CGRect rect) {
         if (img) [img drawInRect:disc];
         else { [SKIN->separator setFill]; CGContextFillRect(ctx, disc); }
         CGContextRestoreGState(ctx);
-        [[UIColor colorWithWhite:0 alpha:0.12f] setStroke];
+        [W(0, 0.12f) setStroke];
         CGContextSetLineWidth(ctx, LRHairline());
         CGContextStrokeEllipseInRect(ctx, CGRectInset(disc, 0.25f, 0.25f));
         return;
     }
     CGContextSaveGState(ctx);
-    CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.35f);
-    CGContextFillEllipseInRect(ctx, CGRectOffset(disc, 0, 0.8f));
+    CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.25f);
+    CGContextFillEllipseInRect(ctx, CGRectOffset(disc, 0, 0.6f));
     CGContextAddEllipseInRect(ctx, disc);
     CGContextClip(ctx);
-    if (img) {
-        [img drawInRect:disc];
-    } else {
-        LRFillVertical(ctx, disc, [UIColor colorWithWhite:0.75f alpha:1], [UIColor colorWithWhite:0.5f alpha:1]);
-    }
-    LRFillLinear(ctx, disc.origin, CGPointMake(disc.origin.x, CGRectGetMaxY(disc)),
-                 [NSArray arrayWithObjects:[UIColor colorWithWhite:1 alpha:0.45f],
-                  [UIColor colorWithWhite:1 alpha:0.05f], [UIColor colorWithWhite:0 alpha:0.18f], nil], NULL);
+    if (img) [img drawInRect:disc];
+    else LRFillVertical(ctx, disc, W(0.80f, 1), W(0.62f, 1));
+    /* a little glass over the top half */
+    LRFillVertical(ctx, CGRectMake(disc.origin.x, disc.origin.y, disc.size.width, disc.size.height / 2),
+                   W(1, 0.35f), W(1, 0.06f));
     CGContextRestoreGState(ctx);
-    CGContextSaveGState(ctx);
-    CGContextSetRGBStrokeColor(ctx, 0.85f, 0.86f, 0.88f, 0.9f);
-    CGContextSetLineWidth(ctx, 1.0f);
+    CGContextSetRGBStrokeColor(ctx, 0, 0, 0, 0.28f);
+    CGContextSetLineWidth(ctx, 1);
     CGContextStrokeEllipseInRect(ctx, CGRectInset(disc, 0.5f, 0.5f));
-    CGContextRestoreGState(ctx);
 }

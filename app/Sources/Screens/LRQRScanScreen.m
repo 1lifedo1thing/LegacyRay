@@ -22,10 +22,10 @@
     CGContextRef ctx = UIGraphicsGetCurrentContext();
     CGRect b = CGRectInset(self.bounds, 3, 3);
     LRSkin *s = SKIN;
-    UIColor *c = s->flat ? [UIColor whiteColor] : s->glow;
+    UIColor *c = [UIColor whiteColor];
     CGFloat len = b.size.width * 0.18f;
     CGContextSaveGState(ctx);
-    if (!s->flat) CGContextSetShadowWithColor(ctx, CGSizeZero, 6, c.CGColor);
+    if (!s->flat) CGContextSetShadowWithColor(ctx, CGSizeZero, 3, [UIColor colorWithWhite:0 alpha:0.6f].CGColor);
     [c setStroke];
     CGContextSetLineWidth(ctx, 4);
     CGContextSetLineCap(ctx, kCGLineCapRound);
@@ -93,7 +93,7 @@ NSString *LRDecodeQRImage(UIImage *photo) {
 - (id)init {
     if ((self = [super init])) {
         self.title = L(@"Scan QR Code");
-        _backgroundStyle = LRBackgroundPlate;
+        _backgroundStyle = LRBackgroundDenim;
     }
     return self;
 }

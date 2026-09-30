@@ -23,7 +23,7 @@
 
 - (id)init {
     if ((self = [super init])) {
-        _backgroundStyle = LRBackgroundLeather;
+        _backgroundStyle = LRBackgroundGrouped;
         self.title = L(@"Stations");
     }
     return self;
@@ -40,13 +40,11 @@
 }
 
 - (CGFloat)margin {
-    if (SKIN->flat) return 0;
-    return _table.bounds.size.width >= 500 ? 16 : 10;
+    return LRPlateMargin(_table.bounds.size.width);
 }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    if (_embedded) self.title = L(@"Station Log");
     _header.title = self.title;
     __block LRStationsScreen *me = self;
     UIColor *ink = [LRHeaderBar glyphColor];
@@ -59,7 +57,9 @@
     _table.separatorStyle = UITableViewCellSeparatorStyleNone;
     _table.dataSource = self;
     _table.delegate = self;
-    _table.indicatorStyle = SKIN->flat ? UIScrollViewIndicatorStyleDefault : UIScrollViewIndicatorStyleWhite;
+    _table.indicatorStyle = UIScrollViewIndicatorStyleDefault;
+    /* room under the last group, like a grouped table */
+    _table.tableFooterView = [[[UIView alloc] initWithFrame:CGRectMake(0, 0, 10, 20)] autorelease];
     _table.allowsSelectionDuringEditing = YES;
     [self.contentView addSubview:_table];
     UILongPressGestureRecognizer *lp = [[[UILongPressGestureRecognizer alloc]
@@ -152,17 +152,19 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
     title.tag = 1;
     title.backgroundColor = [UIColor clearColor];
     title.textAlignment = NSTextAlignmentCenter;
-    title.font = s->flat ? [LRSkin bodyFont:20] : [LRSkin titleFont:20];
-    title.textColor = s->flat ? s->groupInk : s->stitch;
-    title.shadowColor = s->flat ? nil : [UIColor colorWithWhite:0 alpha:0.6f];
-    title.shadowOffset = CGSizeMake(0, -1);
+    title.font = s->flat ? [LRSkin bodyFont:20] : [LRSkin boldFont:20];
+    title.textColor = s->flat ? s->groupInk : s->groupHeader;
+    title.shadowColor = s->flat ? nil : s->groupHeaderShadow;
+    title.shadowOffset = CGSizeMake(0, 1);
     UILabel *text = [[[UILabel alloc] init] autorelease];
     text.tag = 2;
     text.backgroundColor = [UIColor clearColor];
     text.textAlignment = NSTextAlignmentCenter;
     text.numberOfLines = 0;
-    text.font = [LRSkin bodyFont:14];
-    text.textColor = s->flat ? s->groupMuted : LRColorAlpha(s->stitch, 0.85f);
+    text.font = [LRSkin bodyFont:s->flat ? 14 : 15];
+    text.textColor = s->flat ? s->groupMuted : s->groupHeader;
+    text.shadowColor = s->flat ? nil : s->groupHeaderShadow;
+    text.shadowOffset = CGSizeMake(0, 1);
     BOOL offline = catalog.loaded == NO;
     title.text = offline ? L(@"The daemon is silent") : L(@"No stations yet");
     text.text = offline ? L(@"LegacyRay could not reach its background service. Start it again, or reinstall the package if this keeps happening.")
@@ -249,7 +251,11 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
     LRTunnel *tunnel = [LRTunnel shared];
     CGFloat margin = [self margin];
     NSDictionary *next = ip.row + 1 < (NSInteger)[_rows count] ? [_rows objectAtIndex:(NSUInteger)ip.row + 1] : nil;
+    NSDictionary *prev = ip.row > 0 ? [_rows objectAtIndex:(NSUInteger)ip.row - 1] : nil;
     BOOL last = !next || [[next objectForKey:@"kind"] isEqualToString:@"plate"];
+    BOOL first = !prev || [[prev objectForKey:@"kind"] isEqualToString:@"plate"];
+    LRPlatePosition position = first ? (last ? LRPlateSingle : LRPlateTop) : (last ? LRPlateBottom : LRPlateMiddle);
+    __block LRStationsScreen *me = self;
     if ([kind isEqualToString:@"plate"]) {
         LRSection *sec = [row objectForKey:@"section"];
         if (!sec) {
@@ -270,7 +276,10 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
         BOOL sel = isActive && [LRPrefs selectedBackend] == LRBackendAmneziaWG;
         BOOL live = sel && tunnel.activeBackend == LRBackendAmneziaWG && tunnel.state == LRTunnelConnected;
         [(LRStationCell *)cell showTitle:p.name detail:[p summary] selected:sel
-                                    live:live margin:margin last:last];
+                                    live:live margin:margin position:position];
+        ((LRStationCell *)cell).infoAction = ^{
+            [me presentSheet:[[[LRAWGProfileScreen alloc] initWithProfile:p] autorelease]];
+        };
         return;
     }
     LRServer *sv = [row objectForKey:@"server"];
@@ -278,7 +287,8 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
     BOOL selected = [LRPrefs selectedBackend] == LRBackendServer && sv.index == catalog.selectedIndex;
     BOOL live = selected && tunnel.activeBackend == LRBackendServer && tunnel.state == LRTunnelConnected;
     [(LRStationCell *)cell showServer:sv name:[sec nameForServer:sv] ping:[catalog pingForServer:sv]
-                             selected:selected live:live margin:margin last:last];
+                             selected:selected live:live margin:margin position:position];
+    ((LRStationCell *)cell).infoAction = _arranging ? nil : ^{ [me openServerDetail:sv]; };
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
@@ -433,7 +443,7 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
     }
     LRLog(@"stations", @"station selected");
     [self pingsChanged];
-    if (!_embedded && !switchNow && ![t isOn]) [LRToast show:[NSString stringWithFormat:L(@"Tuned to %@"),
+    if (!_embedded && !switchNow && ![t isOn]) [LRToast show:[NSString stringWithFormat:L(@"%@ selected"),
                                                               [[LRCatalog shared] displayNameForServer:sv]]];
 }
 

@@ -1,6 +1,6 @@
-/* an action menu. on the iphone it rises from the bottom as a panel of
-   hardware keys; on the ipad it floats next to the control that opened it,
-   like a popover, and a tap outside closes it */
+/* an action menu. on the iphone it rises from the bottom as an action sheet
+   (ios 6 black translucent, or ios 7); on the ipad it floats next to the
+   control that opened it as a popover, and a tap outside closes it */
 #import <UIKit/UIKit.h>
 
 @interface LRMenu : UIView {

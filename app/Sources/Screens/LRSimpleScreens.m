@@ -71,12 +71,14 @@
     _textView.editable = NO;
     _textView.font = [LRSkin monoFont:LRIsPad() ? 13 : 11];
     _textView.text = [_text length] ? _text : L(@"(empty)");
-    _textView.backgroundColor = s->flat ? [UIColor whiteColor]
-        : (s->night ? [UIColor colorWithRed:0.12f green:0.11f blue:0.10f alpha:1]
-                    : [UIColor colorWithRed:0.99f green:0.97f blue:0.90f alpha:1]);
-    _textView.textColor = s->night && !s->flat ? [UIColor colorWithRed:1 green:0.8f blue:0.5f alpha:1]
-                                          : [UIColor colorWithWhite:0.12f alpha:1];
-    if (!s->flat) _textView.layer.cornerRadius = 6;
+    _textView.backgroundColor = [UIColor whiteColor];
+    _textView.textColor = [UIColor colorWithWhite:0.12f alpha:1];
+    if (!s->flat) {
+        /* a grouped row's white, rim and corners */
+        _textView.layer.cornerRadius = 10;
+        _textView.layer.borderColor = s->groupEdge.CGColor;
+        _textView.layer.borderWidth = 1;
+    }
     [self.contentView addSubview:_textView];
     __block LRTextScreen *me = self;
     [self.header setRightGlyph:LRGlyphDots(18, [LRHeaderBar glyphColor]) action:^(LRButton *b) {
@@ -92,7 +94,7 @@
 
 - (void)layoutContent {
     CGRect b = self.contentView.bounds;
-    _textView.frame = SKIN->flat ? b : CGRectInset(b, 8, 8);
+    _textView.frame = SKIN->flat ? b : CGRectInset(b, 10, 10);
 }
 
 - (void)showActions:(UIView *)anchor {

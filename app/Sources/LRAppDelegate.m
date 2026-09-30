@@ -108,14 +108,11 @@ static LRAppDelegate *gShared = nil;
 
 - (void)welcome {
     [LRAlert showTitle:L(@"Welcome to LegacyRay")
-               message:L(@"Press IMPORT to add a server or a subscription, then turn the POWER knob. Long press stations and plates for more.")];
+               message:L(@"Tap + to add a server or a subscription, then tap the big button. Hold a station for more.")];
 }
 
 - (void)applicationDidBecomeActive:(UIApplication *)application {
-    /* the classic automatic theme follows the clock */
-    BOOL nightNow = [LRPrefs nightSkinActive], flatNow = [LRPrefs flatSkinActive];
-    LRSkin *s = [LRSkin current];
-    if (s->night != nightNow || s->flat != flatNow) [self rebuildInterface];
+    if ([LRSkin current]->flat != [LRPrefs flatSkinActive]) [self rebuildInterface];
     [[LRTunnel shared] start];
     [[LRCatalog shared] reload];
     [[LRDaemonSettings shared] refresh];

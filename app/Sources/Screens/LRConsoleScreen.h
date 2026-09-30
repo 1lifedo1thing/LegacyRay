@@ -1,31 +1,20 @@
-/* the receiver: display, tuning dial, the two meters, the power knob with the
-   seek keys, the quick switches and the front panel keys. lays itself out for
-   whatever box it gets: a phone screen, the right half of a landscape ipad or
-   the top of a portrait one */
+/* the main screen: one button, what the tunnel is doing under it, and the
+   station it connects to. lays itself out for whatever box it gets: a phone
+   screen or the right pane of the ipad */
 #import "LRScreen.h"
 
-@class LRDisplayView, LRTuningDial, LRVUMeter, LRPowerButton, LRToggleSwitch;
+@class LRPowerButton, LRServerCard;
 
 @interface LRConsoleScreen : LRScreen {
-    UIView *_decor;
-    LRDisplayView *_display;
-    LRTuningDial *_dial;
-    LRVUMeter *_upMeter;
-    LRVUMeter *_downMeter;
     LRPowerButton *_power;
-    LRButton *_seekBack;
-    LRButton *_seekForward;
-    UILabel *_powerCaption;
-    UILabel *_seekCaptions[2];
-    NSArray *_toggles;          /* LRToggleSwitch */
-    NSArray *_toggleCaptions;   /* UILabel */
-    NSArray *_keys;             /* LRButton, the front panel keys */
-    NSArray *_dialServers;
+    UILabel *_status;
+    UILabel *_detail;
+    LRServerCard *_card;
     BOOL _embedded;
     BOOL _stale;                /* something changed while off screen */
     NSString *_shownError;
 }
-/* inside the ipad split the station log is beside the console, so the keys
-   change: no STATIONS key, a CHECK key instead */
+/* inside the ipad split the stations are beside the console: the card opens
+   the station's details and the bar has a Check key instead of Add */
 @property (nonatomic, assign) BOOL embedded;
 @end

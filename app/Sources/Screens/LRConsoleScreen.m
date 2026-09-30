@@ -1,14 +1,11 @@
 #import "LRConsoleScreen.h"
-#import "LRDisplayView.h"
-#import "LRTuningDial.h"
-#import "LRVUMeter.h"
 #import "LRPowerButton.h"
-#import "LRToggleSwitch.h"
+#import "LRServerCard.h"
 #import "LRDraw.h"
 #import "LRTunnel.h"
 #import "LRCatalog.h"
 #import "LRPrefs.h"
-#import "LRDaemonSettings.h"
+#import "LRAWGProfiles.h"
 #import "LRImporter.h"
 #import "LRToast.h"
 #import "LRStationsScreen.h"
@@ -16,58 +13,33 @@
 #import "LRSettingsScreen.h"
 #import "LRDiagnosticsScreen.h"
 
-/* the nameplate and the four corner screws, drawn once over the faceplate */
-@interface LRConsoleDecor : UIView {
-@public
-    CGFloat nameplateBottom;
-}
-@end
+/* where things go for a content box of a given size */
+typedef struct {
+    CGFloat radius, side, centerY, statusY, cardY, cardW;
+} LRConsoleGeometry;
 
-@implementation LRConsoleDecor
-- (id)initWithFrame:(CGRect)frame {
-    if ((self = [super initWithFrame:frame])) {
-        self.opaque = NO;
-        self.backgroundColor = [UIColor clearColor];
-        self.userInteractionEnabled = NO;
-        self.contentMode = UIViewContentModeRedraw;
+static LRConsoleGeometry LRConsoleLayoutFor(CGSize size) {
+    LRConsoleGeometry g;
+    CGFloat W = size.width, H = size.height;
+    CGFloat cardH = [LRServerCard height];
+    if (W < 500) {
+        /* the phone: the button high, the station at the bottom */
+        g.radius = H < 440 ? 70 : 78;
+        g.side = [LRPowerButton sideForRadius:g.radius];
+        g.centerY = 30 + g.side / 2 + (H >= 440 ? 10 : 0);
+        g.statusY = g.centerY + g.side / 2 + 14;
+        g.cardW = MIN(W - 20, 420);
+        g.cardY = MAX(g.statusY + 70, H - cardH - 12);
+    } else {
+        /* the ipad pane: everything in one column around the middle */
+        g.radius = MIN(110.0f, MAX(80.0f, MIN(W, H) * 0.16f));
+        g.side = [LRPowerButton sideForRadius:g.radius];
+        g.centerY = MAX(g.side / 2 + 30, H * 0.36f);
+        g.statusY = g.centerY + g.side / 2 + 18;
+        g.cardW = MIN(W - 60, 420);
+        g.cardY = MIN(g.statusY + 96, H - cardH - 20);
     }
-    return self;
-}
-
-- (void)drawRect:(CGRect)rect {
-    CGContextRef ctx = UIGraphicsGetCurrentContext();
-    LRSkin *s = SKIN;
-    CGRect b = self.bounds;
-    CGFloat mid = CGRectGetMidX(b);
-    if (s->flat) {
-        UIFont *f = [LRSkin lightFont:22];
-        LRDrawEngraved(@"LegacyRay", CGRectMake(0, 10, b.size.width, 28), f, NSTextAlignmentCenter,
-                       s->groupInk, nil, 0);
-        return;
-    }
-    LRDrawScrew(ctx, CGPointMake(12, 12), 4, 0.6f);
-    LRDrawScrew(ctx, CGPointMake(b.size.width - 12, 12), 4, 2.0f);
-    LRDrawScrew(ctx, CGPointMake(12, b.size.height - 12), 4, 1.1f);
-    LRDrawScrew(ctx, CGPointMake(b.size.width - 12, b.size.height - 12), 4, 0.3f);
-    UIFont *title = [LRSkin titleFont:21];
-    LRDrawEngraved(@"LegacyRay", CGRectMake(0, 8, b.size.width, 26), title, NSTextAlignmentCenter,
-                   s->engrave, s->engraveShadow, s->engraveOffset);
-    UIFont *legend = [LRSkin labelFont:7.5f];
-    LRDrawTracked(L(@"FULL-DEVICE VLESS RECEIVER"), mid, 34, legend, 1.6f, NSTextAlignmentCenter,
-                  s->engrave, s->engraveShadow, s->engraveOffset);
-}
-@end
-
-static UILabel *LRLegendLabel(void) {
-    LRSkin *s = SKIN;
-    UILabel *l = [[[UILabel alloc] init] autorelease];
-    l.backgroundColor = [UIColor clearColor];
-    l.textAlignment = NSTextAlignmentCenter;
-    l.font = s->flat ? [LRSkin bodyFont:11] : [LRSkin labelFont:8];
-    l.textColor = s->flat ? s->groupMuted : s->engrave;
-    l.shadowColor = s->flat ? nil : s->engraveShadow;
-    l.shadowOffset = CGSizeMake(0, s->engraveOffset);
-    return l;
+    return g;
 }
 
 @implementation LRConsoleScreen
@@ -75,256 +47,110 @@ static UILabel *LRLegendLabel(void) {
 
 - (id)init {
     if ((self = [super init])) {
-        _backgroundStyle = LRBackgroundPlate;
-        _hidesHeader = YES;
+        _backgroundStyle = LRBackgroundDenim;
         self.title = @"LegacyRay";
+        _manualLeftButton = YES;
     }
     return self;
 }
 
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [_decor release];
-    [_display release];
-    [_dial release];
-    [_upMeter release];
-    [_downMeter release];
     [_power release];
-    [_seekBack release];
-    [_seekForward release];
-    [_powerCaption release];
-    [_seekCaptions[0] release];
-    [_seekCaptions[1] release];
-    [_toggles release];
-    [_toggleCaptions release];
-    [_keys release];
-    [_dialServers release];
+    [_status release];
+    [_detail release];
+    [_card release];
     [_shownError release];
     [super dealloc];
 }
 
 #pragma mark building
 
-- (LRButton *)key:(NSString *)title action:(void (^)(LRButton *))action {
-    LRButton *b = [LRButton buttonWithStyle:SKIN->night ? LRButtonDark : LRButtonMetal
-                                      title:SKIN->flat ? title : LRSpaced([title uppercaseString])
-                                     action:action];
-    b.frame = CGRectMake(0, 0, 90, 36);
-    b.titleLabel.font = SKIN->flat ? [LRSkin bodyFont:16] : [LRSkin labelFont:11];
-    return b;
+- (UILabel *)label:(UIFont *)font color:(UIColor *)color lines:(NSInteger)lines {
+    LRSkin *s = SKIN;
+    UILabel *l = [[UILabel alloc] init];
+    l.backgroundColor = [UIColor clearColor];
+    l.textAlignment = NSTextAlignmentCenter;
+    l.font = font;
+    l.textColor = color;
+    l.numberOfLines = lines;
+    if (!s->flat) {
+        l.shadowColor = s->pageShadow;
+        l.shadowOffset = CGSizeMake(0, 1);
+    }
+    return l;
 }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
     __block LRConsoleScreen *me = self;
+    LRSkin *s = SKIN;
     UIView *c = self.contentView;
-    _decor = [[LRConsoleDecor alloc] initWithFrame:c.bounds];
-    [c addSubview:_decor];
+    UIColor *ink = [LRHeaderBar glyphColor];
+    if (_embedded) {
+        [self.header setLeftTitle:L(@"Check") style:LRButtonMetal action:^(LRButton *b) { [me openCheck]; }];
+    } else {
+        LRButton *add = [self.header setLeftTitle:nil style:LRButtonMetal action:^(LRButton *b) {
+            [LRImporter showMenuFrom:b host:me];
+        }];
+        [add setGlyph:LRGlyphPlus(16, ink)];
+    }
+    [self.header setRightGlyph:LRGlyphGear(18, ink) action:^(LRButton *b) { [me openSettings]; }];
 
-    _display = [[LRDisplayView alloc] initWithFrame:CGRectMake(0, 0, 300, 120)];
-    _display.legends = [NSArray arrayWithObjects:L(@"STEALTH"), L(@"LAN"), L(@"ROUTING"), L(@"AUTO"), nil];
-    [_display addTarget:self action:@selector(displayTapped) forControlEvents:UIControlEventTouchUpInside];
-    [c addSubview:_display];
-
-    _dial = [[LRTuningDial alloc] initWithFrame:CGRectMake(0, 0, 300, 44)];
-    [_dial addTarget:self action:@selector(dialChanged) forControlEvents:UIControlEventValueChanged];
-    [c addSubview:_dial];
-
-    _upMeter = [[LRVUMeter alloc] initWithFrame:CGRectMake(0, 0, 140, 84)];
-    _upMeter.caption = L(@"UPLINK B/s");
-    _downMeter = [[LRVUMeter alloc] initWithFrame:CGRectMake(0, 0, 140, 84)];
-    _downMeter.caption = L(@"DOWNLINK B/s");
-    [c addSubview:_upMeter];
-    [c addSubview:_downMeter];
-
-    _power = [[LRPowerButton alloc] initWithFrame:CGRectMake(0, 0, 130, 130)];
+    _power = [[LRPowerButton alloc] initWithFrame:CGRectMake(0, 0, 180, 180)];
     [_power addTarget:self action:@selector(powerPressed) forControlEvents:UIControlEventTouchUpInside];
     [c addSubview:_power];
-    _powerCaption = [LRLegendLabel() retain];
-    _powerCaption.text = SKIN->flat ? L(@"Power") : LRSpaced(L(@"POWER"));
-    [c addSubview:_powerCaption];
+    _status = [self label:s->flat ? [LRSkin lightFont:24] : [LRSkin boldFont:20]
+                    color:s->pageInk lines:1];
+    [c addSubview:_status];
+    _detail = [self label:[LRSkin bodyFont:s->flat ? 15 : 14] color:s->pageMuted lines:2];
+    [c addSubview:_detail];
 
-    UIColor *glyphInk = SKIN->flat ? SKIN->tint
-        : (SKIN->night ? [UIColor colorWithWhite:0.85f alpha:1] : [UIColor colorWithWhite:0.25f alpha:1]);
-    _seekBack = [[LRButton buttonWithStyle:LRButtonMetal title:nil action:^(LRButton *b) {
-        [[LRTunnel shared] seek:-1];
-    }] retain];
-    [_seekBack setGlyph:LRGlyphSeek(20, -1, glyphInk)];
-    _seekForward = [[LRButton buttonWithStyle:LRButtonMetal title:nil action:^(LRButton *b) {
-        [[LRTunnel shared] seek:1];
-    }] retain];
-    [_seekForward setGlyph:LRGlyphSeek(20, 1, glyphInk)];
-    for (int i = 0; i < 2; ++i) {
-        LRButton *b = i ? _seekForward : _seekBack;
-        b.frame = CGRectMake(0, 0, 50, 30);
-        [c addSubview:b];
-        _seekCaptions[i] = [LRLegendLabel() retain];
-        _seekCaptions[i].text = SKIN->flat ? L(@"Seek") : LRSpaced(L(@"SEEK"));
-        [c addSubview:_seekCaptions[i]];
-    }
-
-    NSArray *toggleTitles = [NSArray arrayWithObjects:L(@"AUTO-RECONNECT"), L(@"ROUTING"),
-                             L(@"LAN BYPASS"), L(@"STEALTH"), nil];
-    NSMutableArray *toggles = [NSMutableArray array], *captions = [NSMutableArray array];
-    for (NSUInteger i = 0; i < [toggleTitles count]; ++i) {
-        LRToggleSwitch *t = [[[LRToggleSwitch alloc] initWithFrame:CGRectZero] autorelease];
-        t.tag = (NSInteger)i;
-        [t addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
-        [c addSubview:t];
-        [toggles addObject:t];
-        UILabel *l = LRLegendLabel();
-        NSString *title = [toggleTitles objectAtIndex:i];
-        l.text = SKIN->flat ? [title capitalizedString] : LRSpaced(title);
-        [c addSubview:l];
-        [captions addObject:l];
-    }
-    _toggles = [toggles copy];
-    _toggleCaptions = [captions copy];
-
-    NSMutableArray *keys = [NSMutableArray array];
-    if (!_embedded)
-        [keys addObject:[self key:L(@"Stations") action:^(LRButton *b) { [me openStations]; }]];
-    [keys addObject:[self key:L(@"Import") action:^(LRButton *b) {
-        [LRImporter showMenuFrom:b host:me];
-    }]];
-    if (_embedded)
-        [keys addObject:[self key:L(@"Check") action:^(LRButton *b) { [me openCheck]; }]];
-    [keys addObject:[self key:L(@"Setup") action:^(LRButton *b) { [me openSettings]; }]];
-    for (LRButton *b in keys) [c addSubview:b];
-    _keys = [keys copy];
+    _card = [[LRServerCard alloc] initWithFrame:CGRectMake(0, 0, 300, [LRServerCard height])];
+    [_card addTarget:self action:@selector(cardTapped) forControlEvents:UIControlEventTouchUpInside];
+    UISwipeGestureRecognizer *next = [[[UISwipeGestureRecognizer alloc] initWithTarget:self
+                                                                                action:@selector(swiped:)] autorelease];
+    next.direction = UISwipeGestureRecognizerDirectionLeft;
+    UISwipeGestureRecognizer *prev = [[[UISwipeGestureRecognizer alloc] initWithTarget:self
+                                                                                action:@selector(swiped:)] autorelease];
+    prev.direction = UISwipeGestureRecognizerDirectionRight;
+    [_card addGestureRecognizer:next];
+    [_card addGestureRecognizer:prev];
+    [c addSubview:_card];
 
     NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
     [nc addObserver:self selector:@selector(refresh) name:LRTunnelDidChangeNotification object:nil];
     [nc addObserver:self selector:@selector(tick) name:LRTunnelTickNotification object:nil];
     [nc addObserver:self selector:@selector(refresh) name:LRCatalogDidChangeNotification object:nil];
     [nc addObserver:self selector:@selector(refresh) name:LRCatalogPingNotification object:nil];
-    [nc addObserver:self selector:@selector(refresh) name:LRDaemonSettingsDidChangeNotification object:nil];
+    [nc addObserver:self selector:@selector(refresh) name:LRAWGProfilesDidChangeNotification object:nil];
     [nc addObserver:self selector:@selector(refresh) name:LRPrefsDidChangeNotification object:nil];
     [self refresh];
 }
 
 #pragma mark layout
 
-- (void)place:(UIView *)v x:(CGFloat)x y:(CGFloat)y w:(CGFloat)w h:(CGFloat)h {
-    v.frame = CGRectMake(roundf(x), roundf(y), roundf(w), roundf(h));
+- (CGFloat)backdropFocus {
+    LRConsoleGeometry g = LRConsoleLayoutFor(self.contentView.bounds.size);
+    return self.contentView.frame.origin.y + g.centerY;
 }
 
 - (void)layoutContent {
     CGRect b = self.contentView.bounds;
-    CGFloat W = b.size.width, H = b.size.height;
-    if (W < 10 || H < 10) return;
-    _decor.frame = b;
-    [_decor setNeedsDisplay];
-    BOOL pad = LRIsPad();
-    BOOL wide = W >= 700 || (W >= 560 && H < 640);
-    CGFloat side = pad ? 24 : 16;
-    CGFloat y = 50;
-    CGFloat displayH = pad ? (wide ? 136 : 150) : (H >= 540 ? 122 : 112);
-    [self place:_display x:side y:y w:W - side * 2 h:displayH];
-    _display.compact = !pad;
-    y += displayH + (pad ? 14 : 10);
-    BOOL showDial = pad || H >= 540;
-    _dial.hidden = !showDial;
-    if (showDial) {
-        [self place:_dial x:side y:y w:W - side * 2 h:pad ? 46 : 40];
-        y += (pad ? 46 : 40) + (pad ? 16 : 12);
-    }
-    CGFloat keysH = pad ? 40 : 34;
-    CGFloat keysY = H - keysH - (pad ? 20 : 14);
-    BOOL showToggles = pad || H >= 640;
-    CGFloat togglesH = showToggles ? 58 : 0;
-    CGFloat bottomLimit = keysY - togglesH - (showToggles ? 12 : 8);
-
-    if (wide) {
-        /* [meter] (knob) [meter]: the classic symmetrical receiver front */
-        CGFloat room = bottomLimit - y;
-        CGFloat D = MIN(160.0f, room - 44);
-        CGFloat meterW = MIN(240.0f, (W - side * 2 - D - 60) / 2);
-        CGFloat meterH = MIN(meterW * 0.62f, room - 30);
-        CGFloat cy = y + MAX(D, meterH) / 2 + 4;
-        [self place:_upMeter x:side y:cy - meterH / 2 w:meterW h:meterH];
-        [self place:_downMeter x:W - side - meterW y:cy - meterH / 2 w:meterW h:meterH];
-        CGFloat frame = D + 24;
-        [self place:_power x:(W - frame) / 2 y:cy - frame / 2 w:frame h:frame];
-        [self place:_powerCaption x:(W - 100) / 2 y:cy + frame / 2 - 6 w:100 h:12];
-        CGFloat seekY = CGRectGetMaxY(_upMeter.frame) + 10;
-        [self place:_seekBack x:side + meterW / 2 - 25 y:seekY w:50 h:30];
-        [self place:_seekForward x:W - side - meterW / 2 - 25 y:seekY w:50 h:30];
-    } else {
-        CGFloat gap = pad ? 20 : 12;
-        CGFloat meterW = MIN(pad ? 260.0f : 200.0f, (W - side * 2 - gap) / 2);
-        CGFloat meterH = roundf(meterW * 0.6f);
-        CGFloat totalMeters = meterW * 2 + gap;
-        CGFloat mx = (W - totalMeters) / 2;
-        [self place:_upMeter x:mx y:y w:meterW h:meterH];
-        [self place:_downMeter x:mx + meterW + gap y:y w:meterW h:meterH];
-        y += meterH + (pad ? 12 : 6);
-        CGFloat room = bottomLimit - y;
-        CGFloat D = MAX(80.0f, MIN(pad ? 170.0f : 112.0f, room - 34));
-        CGFloat frame = D + 24;
-        CGFloat cy = y + frame / 2;
-        [self place:_power x:(W - frame) / 2 y:y w:frame h:frame];
-        [self place:_powerCaption x:(W - 100) / 2 y:y + frame - 8 w:100 h:12];
-        CGFloat seekW = 50;
-        CGFloat seekGap = MIN(40.0f, (W / 2 - frame / 2 - seekW - side) );
-        [self place:_seekBack x:W / 2 - frame / 2 - seekGap - seekW y:cy - 15 w:seekW h:30];
-        [self place:_seekForward x:W / 2 + frame / 2 + seekGap y:cy - 15 w:seekW h:30];
-    }
-    for (int i = 0; i < 2; ++i) {
-        LRButton *s = i ? _seekForward : _seekBack;
-        [self place:_seekCaptions[i] x:CGRectGetMidX(s.frame) - 40 y:CGRectGetMaxY(s.frame) + 4 w:80 h:11];
-    }
-    for (NSUInteger i = 0; i < [_toggles count]; ++i) {
-        LRToggleSwitch *t = [_toggles objectAtIndex:i];
-        UILabel *l = [_toggleCaptions objectAtIndex:i];
-        t.hidden = l.hidden = !showToggles;
-        if (!showToggles) continue;
-        CGFloat cw = (W - side * 2) / [_toggles count];
-        CGFloat cx = side + cw * i + cw / 2;
-        CGSize ts = LR_TOGGLE_SIZE;
-        CGFloat ty = keysY - togglesH - 6;
-        [self place:t x:cx - ts.width / 2 y:ty w:ts.width h:ts.height];
-        [self place:l x:cx - cw / 2 y:ty + ts.height + 6 w:cw h:12];
-    }
-    NSUInteger n = [_keys count];
-    CGFloat kw = MIN(pad ? 170.0f : 120.0f, (W - side * 2 - (n - 1) * 8) / n);
-    CGFloat kx = (W - (kw * n + 8 * (n - 1))) / 2;
-    for (NSUInteger i = 0; i < n; ++i)
-        [self place:[_keys objectAtIndex:i] x:kx + i * (kw + 8) y:keysY w:kw h:keysH];
+    CGFloat W = b.size.width;
+    if (W < 10 || b.size.height < 10) return;
+    LRConsoleGeometry g = LRConsoleLayoutFor(b.size);
+    _power.frame = CGRectMake(roundf((W - g.side) / 2), roundf(g.centerY - g.side / 2), g.side, g.side);
+    CGFloat textW = MIN(W - 40, 440);
+    CGFloat tx = roundf((W - textW) / 2);
+    _status.frame = CGRectMake(tx, roundf(g.statusY), textW, 28);
+    CGSize ds = [_detail.text sizeWithFont:_detail.font constrainedToSize:CGSizeMake(textW, 40)
+                              lineBreakMode:NSLineBreakByWordWrapping];
+    _detail.frame = CGRectMake(tx, roundf(g.statusY + 30), textW, MAX(18.0f, ceilf(ds.height)));
+    _card.frame = CGRectMake(roundf((W - g.cardW) / 2), roundf(g.cardY), g.cardW, [LRServerCard height]);
 }
 
 #pragma mark state
-
-- (NSString *)dialLabelFor:(LRServer *)sv {
-    NSString *cc = [sv countryCode];
-    if (cc) return [cc uppercaseString];
-    NSString *name = [[LRCatalog shared] displayNameForServer:sv];
-    return [[name substringToIndex:MIN((NSUInteger)4, [name length])] uppercaseString];
-}
-
-- (void)refreshDial {
-    LRCatalog *catalog = [LRCatalog shared];
-    LRServer *selected = [catalog selectedServer];
-    LRSection *sec = selected ? [catalog sectionForServer:selected]
-                              : ([catalog.sections count] ? [catalog.sections objectAtIndex:0] : nil);
-    NSArray *all = sec.servers ? sec.servers : [NSArray array];
-    NSUInteger maxStations = LRIsPad() ? 14 : 8;
-    NSUInteger start = 0;
-    if ([all count] > maxStations) {
-        NSUInteger at = selected ? [all indexOfObjectIdenticalTo:selected] : 0;
-        if (at == NSNotFound) at = 0;
-        start = at > maxStations / 2 ? at - maxStations / 2 : 0;
-        if (start + maxStations > [all count]) start = [all count] - maxStations;
-    }
-    NSArray *window = [all subarrayWithRange:NSMakeRange(start, MIN(maxStations, [all count] - start))];
-    [_dialServers release];
-    _dialServers = [window retain];
-    NSMutableArray *labels = [NSMutableArray array];
-    for (LRServer *sv in window) [labels addObject:[self dialLabelFor:sv]];
-    _dial.labels = labels;
-    NSUInteger sel = selected ? [window indexOfObjectIdenticalTo:selected] : NSNotFound;
-    [_dial setSelectedIndex:sel == NSNotFound ? -1 : (NSInteger)sel animated:YES];
-}
 
 /* a console hidden under a pushed screen redraws nothing; it catches up once
    when it comes back */
@@ -349,8 +175,82 @@ static UILabel *LRLegendLabel(void) {
     }
 }
 
+- (NSString *)statusTitle {
+    LRTunnel *t = [LRTunnel shared];
+    if (t.busy && t.state != LRTunnelConnected) return L(@"Connecting…");
+    switch (t.state) {
+        case LRTunnelOffline: return L(@"Service Stopped");
+        case LRTunnelIdle: return L(@"Not Connected");
+        case LRTunnelConnecting: return L(@"Connecting…");
+        case LRTunnelConnected: return L(@"Connected");
+        case LRTunnelError: return L(@"Connection Failed");
+    }
+    return @"";
+}
+
+- (NSString *)currentStationName {
+    LRCatalog *catalog = [LRCatalog shared];
+    if ([LRPrefs selectedBackend] == LRBackendAmneziaWG) {
+        LRAWGProfile *p = [LRAWGProfiles active];
+        return p.name ? p.name : @"AmneziaWG";
+    }
+    LRServer *sv = [catalog selectedServer];
+    return sv ? [catalog displayNameForServer:sv] : nil;
+}
+
+- (NSString *)idleDetail {
+    LRTunnel *t = [LRTunnel shared];
+    LRCatalog *catalog = [LRCatalog shared];
+    switch (t.state) {
+        case LRTunnelOffline: return L(@"The background service is not running.");
+        case LRTunnelError: return [t.lastError length] ? t.lastError : L(@"The server did not answer.");
+        case LRTunnelConnecting: return [self currentStationName];
+        default: break;
+    }
+    if (t.busy) return [self currentStationName];
+    return [catalog isEmpty] ? L(@"Add a station to begin.") : L(@"Tap the button to connect.");
+}
+
+- (void)refreshCard {
+    LRCatalog *catalog = [LRCatalog shared];
+    LRSkin *s = SKIN;
+    if ([LRPrefs selectedBackend] == LRBackendAmneziaWG) {
+        LRAWGProfile *p = [LRAWGProfiles active];
+        _card.countryCode = nil;
+        _card.title = p.name ? p.name : @"AmneziaWG";
+        _card.detail = p ? [p summary] : L(@"WireGuard profile");
+        _card.value = nil;
+        return;
+    }
+    LRServer *sv = [catalog selectedServer];
+    if (!sv) {
+        _card.countryCode = nil;
+        _card.title = [catalog isEmpty] ? L(@"No stations yet") : L(@"Choose a station");
+        _card.detail = [catalog isEmpty] ? L(@"Tap to add a link, a QR code or a subscription") : nil;
+        _card.value = nil;
+        return;
+    }
+    _card.countryCode = [sv countryCode];
+    _card.title = [catalog displayNameForServer:sv];
+    _card.detail = [sv protocolSummary];
+    NSNumber *ping = [catalog pingForServer:sv];
+    if (ping && [ping intValue] == LR_PING_RUNNING) {
+        _card.value = L(@"checking");
+        _card.valueColor = s->groupMuted;
+    } else if (ping && [ping intValue] < 0) {
+        _card.value = L(@"no signal");
+        _card.valueColor = s->bad;
+    } else if (ping) {
+        int v = [ping intValue];
+        _card.value = [NSString stringWithFormat:@"%d ms", v];
+        _card.valueColor = s->flat ? (v < 150 ? s->good : (v < 450 ? s->warn : s->bad)) : s->groupDetail;
+    } else {
+        _card.value = nil;
+    }
+}
+
 - (void)refresh {
-    if (![self onScreen] && _display) {
+    if (![self onScreen] && _power) {
 /* the ios 4 ipad container does not forward appearance calls, so also look
    again on the next turn of the run loop, when a new console is in place */
         if (!_stale) [self performSelector:@selector(catchUp) withObject:nil afterDelay:0];
@@ -358,8 +258,6 @@ static UILabel *LRLegendLabel(void) {
         return;
     }
     LRTunnel *t = [LRTunnel shared];
-    LRCatalog *catalog = [LRCatalog shared];
-    LRDaemonSettings *ds = [LRDaemonSettings shared];
     LRPowerState ps = LRPowerOff;
     switch (t.state) {
         case LRTunnelConnected: ps = LRPowerOn; break;
@@ -369,26 +267,7 @@ static UILabel *LRLegendLabel(void) {
     }
     if (t.busy && ps == LRPowerOff) ps = LRPowerTuning;
     _power.powerState = ps;
-    _display.status = t.busy && t.state != LRTunnelConnected ? L(@"TUNING...") : [t stateTitle];
-    BOOL awg = [LRPrefs selectedBackend] == LRBackendAmneziaWG;
-    LRServer *sv = [catalog selectedServer];
-    if (awg) {
-        _display.station = @"AmneziaWG";
-        _display.countryCode = nil;
-        _display.detail = L(@"WireGuard profile");
-    } else if (sv) {
-        _display.station = [catalog displayNameForServer:sv];
-        _display.countryCode = [sv countryCode];
-        NSNumber *ping = [catalog pingForServer:sv];
-        NSString *detail = [sv protocolSummary];
-        if (ping && [ping intValue] >= 0) detail = [detail stringByAppendingFormat:@"  ·  %d ms", [ping intValue]];
-        _display.detail = detail;
-    } else {
-        _display.station = [catalog isEmpty] ? L(@"No stations") : L(@"Select a station");
-        _display.countryCode = nil;
-        _display.detail = [catalog isEmpty] ? L(@"Press IMPORT to add servers") : nil;
-    }
-    _display.message = t.state == LRTunnelError ? t.lastError : nil;
+    _status.text = [self statusTitle];
     if (t.state == LRTunnelError && [t.lastError length] && ![t.lastError isEqualToString:_shownError]) {
         [LRToast showError:t.lastError];
         [_shownError release];
@@ -398,32 +277,23 @@ static UILabel *LRLegendLabel(void) {
         [_shownError release];
         _shownError = nil;
     }
-    NSMutableSet *lit = [NSMutableSet set];
-    if ([LRPrefs stealthMode]) [lit addObject:L(@"STEALTH")];
-    if ([ds boolForKey:@"bypass_lan" fallback:YES]) [lit addObject:L(@"LAN")];
-    if ([ds boolForKey:@"rules_enabled" fallback:YES]) [lit addObject:L(@"ROUTING")];
-    if ([ds boolForKey:@"auto_reconnect" fallback:YES]) [lit addObject:L(@"AUTO")];
-    _display.litLegends = lit;
-    BOOL values[4] = { [ds boolForKey:@"auto_reconnect" fallback:YES],
-                       [ds boolForKey:@"rules_enabled" fallback:YES],
-                       [ds boolForKey:@"bypass_lan" fallback:YES], [LRPrefs stealthMode] };
-    for (NSUInteger i = 0; i < [_toggles count]; ++i) {
-        LRToggleSwitch *toggle = [_toggles objectAtIndex:i];
-        if (toggle.on != values[i]) [toggle setOn:values[i] animated:YES];
-    }
-    [self refreshDial];
+    [self refreshCard];
     [self tick];
 }
 
 - (void)tick {
     if (![self onScreen]) return;
     LRTunnel *t = [LRTunnel shared];
-    BOOL on = t.state == LRTunnelConnected;
-    _display.seconds = on ? [t liveUptime] : 0;
-    _display.upText = on ? LRBytes(t.bytesUp) : nil;
-    _display.downText = on ? LRBytes(t.bytesDown) : nil;
-    [_upMeter setSpeed:on ? t.speedUp : 0];
-    [_downMeter setSpeed:on ? t.speedDown : 0];
+    NSString *text;
+    if (t.state == LRTunnelConnected)
+        text = [NSString stringWithFormat:@"%@    ↓ %@    ↑ %@", LRDuration([t liveUptime]),
+                LRBytes(t.bytesDown), LRBytes(t.bytesUp)];
+    else
+        text = [self idleDetail];
+    if ([text isEqualToString:_detail.text]) return;
+    BOOL relayout = [text length] > 44 || [_detail.text length] > 44;
+    _detail.text = text;
+    if (relayout) [self layoutContent];
 }
 
 #pragma mark actions
@@ -432,46 +302,23 @@ static UILabel *LRLegendLabel(void) {
     [[LRTunnel shared] toggle];
 }
 
-- (void)dialChanged {
-    NSInteger i = _dial.selectedIndex;
-    if (i < 0 || i >= (NSInteger)[_dialServers count]) return;
-    LRServer *sv = [_dialServers objectAtIndex:(NSUInteger)i];
-    [LRPrefs setSelectedBackend:LRBackendServer];
-    LRTunnel *t = [LRTunnel shared];
-    if ([t isOn] && t.activeBackend == LRBackendServer && sv.index != [LRCatalog shared].selectedIndex)
-        [t connectServerIndex:sv.index];
-    else {
-        [LRCatalog shared].selectedIndex = sv.index;
-        [self refresh];
-    }
+- (void)swiped:(UISwipeGestureRecognizer *)g {
+    if ([LRPrefs selectedBackend] == LRBackendAmneziaWG) return;
+    [[LRTunnel shared] seek:g.direction == UISwipeGestureRecognizerDirectionLeft ? 1 : -1];
 }
 
-- (void)toggleChanged:(LRToggleSwitch *)t {
-    LRDaemonSettings *ds = [LRDaemonSettings shared];
-    switch (t.tag) {
-        case 0: [ds setBool:t.on forKey:@"auto_reconnect"]; break;
-        case 1:
-            [ds setBool:t.on forKey:@"rules_enabled"];
-            if ([[LRTunnel shared] isOn]) [LRToast show:L(@"Reconnect the VPN to apply routing changes.")];
-            break;
-        case 2:
-            [ds setBool:t.on forKey:@"bypass_lan"];
-            if ([[LRTunnel shared] isOn]) [LRToast show:L(@"Reconnect the VPN to apply routing changes.")];
-            break;
-        case 3: [LRPrefs setStealthMode:t.on]; break;
-    }
-}
-
-- (void)displayTapped {
-    LRServer *sv = [[LRCatalog shared] selectedServer];
-    if (_embedded) {
-        if (sv) [self presentSheet:[[[LRStationScreen alloc] initWithServer:sv] autorelease]];
+- (void)cardTapped {
+    LRCatalog *catalog = [LRCatalog shared];
+    if (catalog.loaded && [catalog isEmpty] && [LRPrefs selectedBackend] != LRBackendAmneziaWG) {
+        [LRImporter showMenuFrom:_card host:self];
         return;
     }
-    [self openStations];
-}
-
-- (void)openStations {
+    if (_embedded) {
+        LRServer *sv = [catalog selectedServer];
+        if (sv && [LRPrefs selectedBackend] == LRBackendServer)
+            [self presentSheet:[[[LRStationScreen alloc] initWithServer:sv] autorelease]];
+        return;
+    }
     [self openScreen:[[[LRStationsScreen alloc] init] autorelease]];
 }
 

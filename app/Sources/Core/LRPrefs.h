@@ -4,11 +4,11 @@
 #import <Foundation/Foundation.h>
 
 typedef enum {
-    LRThemeAuto = 0,     /* flat on ios 7+, classic by time of day before */
-    LRThemeDay,          /* classic silver */
-    LRThemeNight,        /* classic graphite */
+    LRThemeAuto = 0,     /* flat on ios 7+, classic before */
+    LRThemeClassic,      /* classic, the ios 6 finish, on any system */
+    LRThemeOldNight,     /* stored by older builds (graphite): read as classic */
     LRThemeFlat,         /* flat, ios 7 style, on any system */
-    LRThemeClassicAuto   /* classic, silver by day and graphite at night */
+    LRThemeOldTimed      /* stored by older builds (by the clock): read as classic */
 } LRThemeSetting;
 
 typedef enum {
@@ -43,8 +43,6 @@ extern NSString * const LRPrefsDidChangeNotification;
 + (void)setTheme:(LRThemeSetting)theme;
 /* the resolved skin right now */
 + (BOOL)flatSkinActive;
-/* YES for graphite (only meaningful when the classic skin is active) */
-+ (BOOL)nightSkinActive;
 /* ios 7 or later: the system the flat skin is the default on */
 + (BOOL)systemIsFlat;
 

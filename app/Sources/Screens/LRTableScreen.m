@@ -47,7 +47,7 @@
     _tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     _tableView.dataSource = self;
     _tableView.delegate = self;
-    _tableView.indicatorStyle = SKIN->night ? UIScrollViewIndicatorStyleWhite : UIScrollViewIndicatorStyleDefault;
+    _tableView.indicatorStyle = UIScrollViewIndicatorStyleDefault;
     [self.contentView addSubview:_tableView];
     if (_tableHeader) _tableView.tableHeaderView = _tableHeader;
     [self reloadSections];
@@ -115,7 +115,13 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
 }
 
 - (UIFont *)captionFont:(BOOL)header {
-    return header && !SKIN->flat ? [LRSkin boldFont:15] : [LRSkin bodyFont:13];
+    if (SKIN->flat) return [LRSkin bodyFont:13];
+    return header ? [LRSkin boldFont:17] : [LRSkin bodyFont:15];
+}
+
+/* captions line up with the text in the rows */
+- (CGFloat)captionInset {
+    return [self margin] + (SKIN->flat ? 15 : 10);
 }
 
 - (NSString *)captionText:(NSString *)text header:(BOOL)header {
@@ -128,10 +134,10 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
         if (header) return SKIN->flat ? 24 : 14;
         return last ? 26 : 6;
     }
-    CGFloat inset = [self margin] + 15;
+    CGFloat inset = [self captionInset];
     CGSize ts = [[self captionText:text header:header] sizeWithFont:[self captionFont:header]
                                                   constrainedToSize:CGSizeMake(width - inset * 2, 400)];
-    CGFloat h = ceilf(ts.height) + (header ? (SKIN->flat ? 32 : 24) : 16);
+    CGFloat h = ceilf(ts.height) + (header ? (SKIN->flat ? 32 : 22) : 16);
     return last ? h + 20 : h;
 }
 
@@ -166,11 +172,11 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
     l.text = [self captionText:text header:header];
     l.font = [self captionFont:header];
     l.textAlignment = !s->flat && !header ? NSTextAlignmentCenter : NSTextAlignmentLeft;
-    l.textColor = s->flat || header ? s->groupHeader : LRColorAlpha(s->groupHeader, 0.85f);
+    l.textColor = s->groupHeader;
     l.shadowColor = s->flat ? nil : s->groupHeaderShadow;
-    l.shadowOffset = CGSizeMake(0, s->night ? -1 : 1);
+    l.shadowOffset = CGSizeMake(0, 1);
     CGFloat width = tableView.bounds.size.width;
-    CGFloat inset = [self margin] + 15;
+    CGFloat inset = [self captionInset];
     CGSize ts = [l.text sizeWithFont:l.font constrainedToSize:CGSizeMake(width - inset * 2, 400)];
     CGFloat y = header ? h - ceilf(ts.height) - 7 : 7;
     l.frame = CGRectMake(inset, y, width - inset * 2, ceilf(ts.height));

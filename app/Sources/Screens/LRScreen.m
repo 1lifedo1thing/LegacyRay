@@ -70,6 +70,7 @@ void LRApplyHeaderCoverage(UIScrollView *scroll, CGFloat coverage) {
     [_header release];
     [_contentView release];
     [_backdrop release];
+    [_vignette release];
     [super dealloc];
 }
 
@@ -81,6 +82,8 @@ void LRApplyHeaderCoverage(UIScrollView *scroll, CGFloat coverage) {
     _contentView = nil;
     [_backdrop release];
     _backdrop = nil;
+    [_vignette release];
+    _vignette = nil;
 }
 
 - (void)loadView {
@@ -132,7 +135,7 @@ void LRApplyHeaderCoverage(UIScrollView *scroll, CGFloat coverage) {
             [_header setBackButtonWithTitle:L(@"Back") action:^(LRButton *b) { [me close]; }];
     } else if ([self isModalRoot]) {
         if (!_header.leftButton)
-            [_header setLeftTitle:L(@"Done") style:LRButtonMetal action:^(LRButton *b) { [me close]; }];
+            [_header setLeftTitle:L(@"Done") style:LRButtonGreen action:^(LRButton *b) { [me close]; }];
     } else {
         _header.leftButton = nil;
     }
@@ -143,13 +146,29 @@ void LRApplyHeaderCoverage(UIScrollView *scroll, CGFloat coverage) {
     _header.title = title;
 }
 
-- (UIImage *)backdropImageForSize:(CGSize)size {
-    switch (_backgroundStyle) {
-        case LRBackgroundLeather: return LRLeatherImage(size);
-        case LRBackgroundPlate: return LRFaceplateImage(size);
-        case LRBackgroundLinen: break;
+- (CGFloat)backdropFocus {
+    return roundf(self.view.bounds.size.height * 0.4f);
+}
+
+/* the pinstripes are a pattern colour, so a table screen keeps no screen
+   sized bitmap; only the denim page is drawn, once per size */
+- (void)updateBackdrop {
+    CGRect b = self.view.bounds;
+    LRSkin *s = SKIN;
+    if (_backgroundStyle == LRBackgroundDenim && !s->flat) {
+        _backdrop.backgroundColor = LRDenimPageColor();
+        if (!_vignette) {
+            _vignette = [[UIImageView alloc] initWithImage:LRVignetteImage()];
+            _vignette.userInteractionEnabled = NO;
+            [self.view insertSubview:_vignette aboveSubview:_backdrop];
+        }
+        /* the light is a small gradient stretched round the focus */
+        CGFloat r = MAX(b.size.width, b.size.height) * 0.85f;
+        _vignette.frame = CGRectMake(roundf(b.size.width / 2 - r), roundf([self backdropFocus] - r), r * 2, r * 2);
+        return;
     }
-    return LRLinenImage(size);
+    if (_backgroundStyle == LRBackgroundDenim) _backdrop.backgroundColor = [UIColor colorWithWhite:0.97f alpha:1];
+    else _backdrop.backgroundColor = s->flat ? s->background : LRPinstripeColor();
 }
 
 - (void)viewWillLayoutSubviews {
@@ -158,8 +177,6 @@ void LRApplyHeaderCoverage(UIScrollView *scroll, CGFloat coverage) {
 
 - (void)layoutEverything {
     CGRect b = self.view.bounds;
-    if (!CGSizeEqualToSize(_backdrop.image.size, b.size))
-        _backdrop.image = [self backdropImageForSize:b.size];
     _backdrop.frame = b;
     /* on ios 7 the status bar lies over the top of the screen: the header
        grows under it, or the content starts below it when there is none */
@@ -178,6 +195,7 @@ void LRApplyHeaderCoverage(UIScrollView *scroll, CGFloat coverage) {
         _contentView.frame = CGRectMake(0, top, b.size.width, b.size.height - top);
         _headerCoverage = 0;
     }
+    [self updateBackdrop];
     [self layoutContent];
 }
 

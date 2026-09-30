@@ -1,12 +1,37 @@
 #import "LRTextField.h"
 #import "LRDraw.h"
 
+/* the ios 6 rounded rect field: white, a grey rim, a little shade inside
+   the top edge; flat: a white box with a hairline */
 static UIImage *LRWellImage(void) {
-    LRSkin *s = SKIN;
-    UIColor *top = s->night ? [UIColor colorWithWhite:0.10f alpha:1] : [UIColor colorWithWhite:0.93f alpha:1];
-    UIColor *bottom = s->night ? [UIColor colorWithWhite:0.17f alpha:1] : [UIColor whiteColor];
+    BOOL flat = SKIN->flat;
     UIImage *img = LRImageWithSize(CGSizeMake(21, 36), NO, ^(CGContextRef ctx, CGRect rect) {
-        LRDrawInsetWell(ctx, CGRectMake(1, 1, 19, 33), 6, top, bottom, 0.7f);
+        CGRect body = CGRectMake(0.5f, 0.5f, 20, 34);
+        if (flat) {
+            LRAddRoundRect(ctx, body, 5);
+            [[UIColor whiteColor] setFill];
+            CGContextFillPath(ctx);
+            LRAddRoundRect(ctx, body, 5);
+            [SKIN->separator setStroke];
+            CGContextSetLineWidth(ctx, LRHairline());
+            CGContextStrokePath(ctx);
+            return;
+        }
+        LRAddRoundRect(ctx, CGRectOffset(body, 0, 1), 7);
+        CGContextSetRGBFillColor(ctx, 1, 1, 1, 0.6f);
+        CGContextFillPath(ctx);
+        CGContextSaveGState(ctx);
+        LRAddRoundRect(ctx, body, 7);
+        CGContextClip(ctx);
+        [[UIColor whiteColor] setFill];
+        CGContextFillRect(ctx, body);
+        LRFillVertical(ctx, CGRectMake(0, 0, 21, 4), [UIColor colorWithWhite:0 alpha:0.16f],
+                       [UIColor colorWithWhite:0 alpha:0]);
+        CGContextRestoreGState(ctx);
+        LRAddRoundRect(ctx, body, 7);
+        CGContextSetRGBStrokeColor(ctx, 0, 0, 0, 0.38f);
+        CGContextSetLineWidth(ctx, 1);
+        CGContextStrokePath(ctx);
     });
     return LRStretchable(img, 10, 17);
 }
@@ -18,13 +43,13 @@ static UIImage *LRWellImage(void) {
         LRSkin *s = SKIN;
         self.background = LRWellImage();
         self.borderStyle = UITextBorderStyleNone;
-        self.font = [LRSkin bodyFont:15];
-        self.textColor = s->night ? [UIColor colorWithWhite:0.92f alpha:1] : [UIColor colorWithWhite:0.12f alpha:1];
+        self.font = [LRSkin bodyFont:s->flat ? 15 : 17];
+        self.textColor = s->groupInk;
         self.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
         self.autocorrectionType = UITextAutocorrectionTypeNo;
         self.autocapitalizationType = UITextAutocapitalizationTypeNone;
         self.clearButtonMode = UITextFieldViewModeWhileEditing;
-        self.keyboardAppearance = s->night ? UIKeyboardAppearanceAlert : UIKeyboardAppearanceDefault;
+        self.keyboardAppearance = UIKeyboardAppearanceDefault;
     }
     return self;
 }
@@ -67,10 +92,10 @@ static UIImage *LRWellImage(void) {
         _textView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         _textView.backgroundColor = [UIColor clearColor];
         _textView.font = [LRSkin monoFont:13];
-        _textView.textColor = s->night ? [UIColor colorWithWhite:0.9f alpha:1] : [UIColor colorWithWhite:0.12f alpha:1];
+        _textView.textColor = s->groupInk;
         _textView.autocorrectionType = UITextAutocorrectionTypeNo;
         _textView.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        _textView.keyboardAppearance = s->night ? UIKeyboardAppearanceAlert : UIKeyboardAppearanceDefault;
+        _textView.keyboardAppearance = UIKeyboardAppearanceDefault;
         [self addSubview:_textView];
     }
     return self;

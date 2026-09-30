@@ -1,37 +1,30 @@
-"""the flat (ios 7+) skin of the console and the station log, as a prototype"""
+"""the flat (ios 7+) finish of the main screen and the stations, as the app
+draws it (the flat branches of LRConsoleScreen, LRPowerButton, LRServerCard
+and LRStationCells):  python3 scripts/design/flat_mockup.py docs/preview-flat-iphone.png"""
 import math
+import os
 import sys
 import cairo
-from skin import hexc, rrect, TAU
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from classic import hexc, rrect, text, glyph, TAU, RES  # noqa: E402
 
 WHITE = (1, 1, 1, 1)
 BG = hexc('#EFEFF4')
+PAGE = hexc('#F7F7F7')
 INK = hexc('#000000')
 MUTED = hexc('#8E8E93')
 LINE = hexc('#C8C7CC')
 TINT = hexc('#007AFF')
 GREEN = hexc('#4CD964')
-ORANGE = hexc('#FF9500')
-FLAG_DIR = '../../app/Resources/flags'
-
-
-def text(cr, s, x, y, size, col, weight=0, align='left', font='Liberation Sans'):
-    cr.select_font_face(font, 0, weight)
-    cr.set_font_size(size)
-    w = cr.text_extents(s).x_advance
-    if align == 'center':
-        x -= w / 2
-    elif align == 'right':
-        x -= w
-    cr.set_source_rgba(*col)
-    cr.move_to(x, y)
-    cr.show_text(s)
-    return w
+GOOD = hexc('#2BB24C')
+RED = hexc('#FF3B30')
+FONT = 'Nimbus Sans'
 
 
 def flag(cr, code, x, y, d):
     try:
-        img = cairo.ImageSurface.create_from_png('%s/flag-%s.png' % (FLAG_DIR, code))
+        img = cairo.ImageSurface.create_from_png(os.path.join(RES, 'flags', 'flag-%s.png' % code))
     except Exception:
         return
     cr.save()
@@ -42,59 +35,54 @@ def flag(cr, code, x, y, d):
     cr.set_source_surface(img, 0, 0)
     cr.paint()
     cr.restore()
+    cr.new_path()
 
 
-def card(cr, x, y, w, h, r=12):
-    rrect(cr, x, y, w, h, r)
-    cr.set_source_rgba(*WHITE)
-    cr.fill_preserve()
-    cr.set_source_rgba(*LINE)
-    cr.set_line_width(0.5)
-    cr.stroke()
-
-
-def meter(cr, x, y, w, h, value, caption):
-    card(cr, x, y, w, h, 10)
-    pcx, pcy, R = x + w / 2, y + h * 1.28, h * 1.06
-    a0, a1 = math.radians(-140), math.radians(-40)
-    cr.save()
-    rrect(cr, x, y, w, h, 10)
-    cr.clip()
-    cr.set_source_rgba(*MUTED)
-    cr.set_line_width(1)
-    cr.arc(pcx, pcy, R, a0, a1)
-    cr.stroke()
-    for i in range(21):
-        a = a0 + (a1 - a0) * i / 20
-        l = 6 if i % 5 == 0 else 3
-        cr.move_to(pcx + math.cos(a) * R, pcy + math.sin(a) * R)
-        cr.line_to(pcx + math.cos(a) * (R - l), pcy + math.sin(a) * (R - l))
-        cr.set_source_rgba(*(hexc('#FF3B30') if i > 15 else MUTED))
-        cr.stroke()
-    a = a0 + (a1 - a0) * value
-    cr.move_to(pcx, pcy)
-    cr.line_to(pcx + math.cos(a) * (R + 2), pcy + math.sin(a) * (R + 2))
-    cr.set_source_rgba(*ORANGE)
-    cr.set_line_width(1.6)
-    cr.stroke()
-    cr.restore()
-    text(cr, 'VU', x + w / 2, y + h * 0.62, h * 0.17, MUTED, 0, 'center')
-    text(cr, caption, x + w / 2, y + h * 0.80, h * 0.085, MUTED, 1, 'center')
-
-
-def status_bar(cr, W):
-    """the ios 7 status bar: no strip of its own, dark text on the app"""
-    text(cr, '●●●●○ LegacyNet', 6, 14, 11, INK, 0)
-    text(cr, '9:41', W / 2, 14, 12, INK, 1, 'center')
-    x, y = W - 30, 6
-    cr.rectangle(x, y, 22, 10)
+def status_bar(cr, w):
+    text(cr, '●●●●○ LegacyNet', 6, 14.5, 12, INK)
+    text(cr, '9:41', w / 2, 14.5, 12, INK, bold=True, align='center')
     cr.set_source_rgba(*INK)
+    cr.rectangle(w - 30, 6, 22, 9)
     cr.set_line_width(1)
     cr.stroke()
-    cr.rectangle(x + 22, y + 3, 2, 4)
+    cr.rectangle(w - 28, 8, 16, 5)
     cr.fill()
-    cr.rectangle(x + 2, y + 2, 14, 6)
+
+
+def bar(cr, w, title, left=None, right=None):
+    cr.rectangle(0, 0, w, 64)
+    cr.set_source_rgba(0.97, 0.97, 0.97, 1)
     cr.fill()
+    cr.rectangle(0, 63.5, w, 0.5)
+    cr.set_source_rgba(*LINE)
+    cr.fill()
+    status_bar(cr, w)
+    text(cr, title, w / 2, 48, 17, INK, bold=True, align='center')
+    if left:
+        text(cr, left, 10, 48, 17, TINT)
+    if right:
+        text(cr, right, w - 12, 48, 20, TINT, align='right')
+
+
+def power(cr, cx, cy, R, color):
+    cr.new_path()
+    cr.arc(cx, cy, R - 1.5, 0, TAU)
+    cr.set_source_rgba(*color)
+    cr.set_line_width(3)
+    cr.stroke()
+    rc = R - 7
+    cr.arc(cx, cy, rc, 0, TAU)
+    cr.fill()
+    cr.set_source_rgba(*WHITE)
+    cr.set_line_width(max(2.0, rc * 0.07))
+    cr.set_line_cap(cairo.LINE_CAP_ROUND)
+    gr = rc * 0.36
+    cr.new_path()
+    cr.arc(cx, cy, gr, -math.pi / 2 + 0.72, -math.pi / 2 - 0.72 + TAU)
+    cr.stroke()
+    cr.move_to(cx, cy - gr * 1.22)
+    cr.line_to(cx, cy - gr * 0.28)
+    cr.stroke()
 
 
 def phone(path):
@@ -102,103 +90,84 @@ def phone(path):
     s = cairo.ImageSurface(cairo.FORMAT_ARGB32, (W * 2 + 20) * 2, H * 2)
     cr = cairo.Context(s)
     cr.scale(2, 2)
-    # console
+    cr.set_source_rgb(1, 1, 1)
+    cr.paint()
+    # the main screen: LRConsoleLayoutFor with a 416 point content box
     cr.rectangle(0, 0, W, H)
-    cr.set_source_rgba(*hexc('#F7F7F7'))
+    cr.set_source_rgba(*PAGE)
     cr.fill()
-    status_bar(cr, W)
-    text(cr, 'LegacyRay', W / 2, 52, 22, INK, 0, 'center')
-    card(cr, 16, 66, W - 32, 112)
-    text(cr, 'CONNECTED', 30, 88, 12, TINT, 1)
-    lx = W - 30
-    for leg, on in (('STEALTH', False), ('ROUTING', True), ('AUTO', True)):
-        cr.set_font_size(8.5)
-        lx -= cr.text_extents(leg).x_advance
-        text(cr, leg, lx, 88, 8.5, TINT if on else (0.56, 0.56, 0.58, 0.35), 1)
-        lx -= 8
-    flag(cr, 'nl', 30, 97, 16)
-    text(cr, 'Amsterdam', 52, 111, 16, INK, 0)
-    text(cr, 'VLESS · REALITY · XHTTP  ·  48 ms', 30, 128, 10.5, MUTED)
-    text(cr, '01:24:07', 27, 168, 42, INK, 0, font='Lato Light')
-    text(cr, '↑ 12.4 MB', W - 30, 150, 11, MUTED, 0, 'right')
-    text(cr, '↓ 318 MB', W - 30, 165, 11, MUTED, 0, 'right')
-    meter(cr, 16, 190, 138, 82, 0.34, 'UPLINK B/s')
-    meter(cr, 166, 190, 138, 82, 0.63, 'DOWNLINK B/s')
-    cx, cy, R = W / 2, 344, 56
-    cr.new_path()
-    cr.arc(cx, cy, R - 1.5, 0, TAU)
-    cr.set_source_rgba(*GREEN)
-    cr.set_line_width(3)
-    cr.stroke()
-    cr.arc(cx, cy, R - 7, 0, TAU)
-    cr.set_source_rgba(*GREEN)
-    cr.fill()
+    bar(cr, W, 'LegacyRay', right='⚙')
+    text(cr, '+', 12, 49, 24, TINT)
+    top, R = 64, 70
+    side = R * 2 + 24
+    cy = top + 30 + side / 2
+    power(cr, W / 2, cy, R, GREEN)
+    sy = cy + side / 2 + 14
+    text(cr, 'Подключено', W / 2, sy + 22, 24, INK, align='center', font='Lato Light')
+    text(cr, '01:24:07    ↓ 318 MB    ↑ 12.4 MB', W / 2, sy + 46, 15, MUTED, align='center')
+    cy2 = H - 64 - 12
+    rrect(cr, 10, cy2, W - 20, 64, 12)
     cr.set_source_rgba(*WHITE)
-    cr.set_line_width(3.5)
-    cr.set_line_cap(cairo.LINE_CAP_ROUND)
-    gr = (R - 7) * 0.36
-    cr.new_path()
-    cr.arc(cx, cy, gr, -math.pi / 2 + 0.75, -math.pi / 2 - 0.75 + TAU)
+    cr.fill_preserve()
+    cr.set_source_rgba(*LINE)
+    cr.set_line_width(0.5)
     cr.stroke()
-    cr.move_to(cx, cy - gr * 1.18)
-    cr.line_to(cx, cy - gr * 0.25)
-    cr.stroke()
-    text(cr, 'Power', cx, cy + R + 16, 11, MUTED, 0, 'center')
-    for sx, glyph in ((cx - R - 70, '◀◀'), (cx + R + 20, '▶▶')):
-        text(cr, 'Seek', sx + 25, cy + 30, 11, MUTED, 0, 'center')
-        cr.set_source_rgba(*TINT)
-        d = -1 if sx < cx else 1
-        for k in (-1, 1):
-            ox = sx + 25 + k * 5
-            cr.move_to(ox - 5 * d, cy - 6)
-            cr.line_to(ox + 5 * d, cy)
-            cr.line_to(ox - 5 * d, cy + 6)
-            cr.close_path()
-            cr.fill()
-    for i, lab in enumerate(('Stations', 'Import', 'Setup')):
-        text(cr, lab, 56 + i * 104, 450, 16, TINT, 0, 'center')
-    # station log
+    flag(cr, 'nl', 26, cy2 + 17.5, 29)
+    text(cr, 'Amsterdam', 66, cy2 + 29, 17, INK)
+    text(cr, 'VLESS · Reality · XHTTP', 66, cy2 + 47, 13, MUTED)
+    text(cr, '48 ms', W - 42, cy2 + 37, 15, GOOD, align='right')
+    text(cr, '›', W - 22, cy2 + 40, 24, hexc('#C7C7CC'), align='right')
+    # the stations
     cr.translate(W + 20, 0)
     cr.rectangle(0, 0, W, H)
     cr.set_source_rgba(*BG)
     cr.fill()
-    cr.rectangle(0, 0, W, 64)
-    cr.set_source_rgba(0.973, 0.973, 0.973, 1)
-    cr.fill()
-    status_bar(cr, W)
-    cr.rectangle(0, 63.5, W, 0.5)
-    cr.set_source_rgba(*LINE)
-    cr.fill()
-    text(cr, 'Stations', W / 2, 48, 17, INK, 1, 'center')
-    text(cr, '‹ Back', 8, 48, 17, TINT)
-    text(cr, '•••   +', W - 12, 48, 17, TINT, 0, 'right')
     y = 64
+    cr.rectangle(0, y, W, 34)
+    cr.set_source_rgba(*BG)
+    cr.fill()
     text(cr, 'NEBULA VPN', 16, y + 22, 13, hexc('#6D6D72'))
-    text(cr, '82% · 12 d', W - 36, y + 22, 12, hexc('#6D6D72'), 0, 'right')
+    text(cr, '82% · 12 дн', W - 36, y + 22, 12, hexc('#6D6D72'), align='right')
     y += 34
-    rows = [('nl', 'Amsterdam', 'VLESS · REALITY', '48 ms', True), ('de', 'Frankfurt', 'VLESS · XHTTP', '61 ms', False),
-            ('fi', 'Helsinki', 'VLESS · GRPC', '97 ms', False), ('us', 'New York', 'TROJAN · TLS', '144 ms', False),
-            ('jp', 'Tokyo', 'VLESS · WS', 'no signal', False)]
-    for i, (code, name, proto, ms, sel) in enumerate(rows):
-        cr.rectangle(0, y, W, 58)
+    rows = [('nl', 'Amsterdam', 'VLESS · Reality', '48 ms', GOOD, True),
+            ('de', 'Frankfurt', 'VLESS · XHTTP', '61 ms', GOOD, False),
+            ('fi', 'Helsinki', 'VLESS · gRPC', '97 ms', GOOD, False),
+            ('us', 'New York', 'Trojan · TLS', '144 ms', GOOD, False),
+            ('jp', 'Tokyo', 'VLESS · WS', 'нет сигнала', RED, False)]
+    for i, (code, name, proto, ms, col, sel) in enumerate(rows):
+        cr.rectangle(0, y, W, 56)
         cr.set_source_rgba(*WHITE)
         cr.fill()
-        cr.arc(20, y + 29, 4, 0, TAU)
-        cr.set_source_rgba(*(GREEN if sel else (0.78, 0.78, 0.8, 1)))
-        cr.fill()
-        flag(cr, code, 36, y + 10, 20)
-        text(cr, name, 64, y + 26, 17, INK)
-        text(cr, proto, 36, y + 45, 12, MUTED)
-        col = hexc('#2BB24C') if ms.endswith('ms') and int(ms.split()[0]) < 150 else (hexc('#FF9500') if ms.endswith('ms') else hexc('#FF3B30'))
-        text(cr, ms, W - 16, y + 24, 13, col, 0, 'right')
-        cr.rectangle(58 if i < len(rows) - 1 else 0, y + 57.5, W, 0.5)
+        mid = y + 28
+        if sel:
+            cr.set_source_rgba(*TINT)
+            cr.set_line_width(2)
+            cr.set_line_cap(cairo.LINE_CAP_ROUND)
+            cr.move_to(14, mid)
+            cr.line_to(18.5, mid + 5)
+            cr.line_to(27, mid - 7)
+            cr.stroke()
+        flag(cr, code, 36, mid - 12, 24)
+        text(cr, name, 70, mid - 3, 17, INK)
+        text(cr, proto, 70, mid + 15, 13, MUTED)
+        text(cr, ms, W - 40, mid + 5, 14, col, align='right')
+        cr.new_path()
+        cr.arc(W - 22, mid, 10, 0, TAU)
+        cr.set_source_rgba(*TINT)
+        cr.set_line_width(1)
+        cr.stroke()
+        text(cr, 'i', W - 22, mid + 5, 14, TINT, align='center')
+        last = i == len(rows) - 1
+        cr.rectangle(0 if last else 44, y + 55.5, W, 0.5)
         cr.set_source_rgba(*LINE)
         cr.fill()
-        y += 58
-    text(cr, 'MANUAL', 16, y + 22, 13, hexc('#6D6D72'))
+        y += 56
+    text(cr, 'ВРУЧНУЮ', 16, y + 22, 13, hexc('#6D6D72'))
+    bar(cr, W, 'Станции', left='‹ Назад', right='•••   +')
     s.write_to_png(path)
 
 
 if __name__ == '__main__':
-    phone(sys.argv[1])
+    phone(sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(RES), '..', 'docs',
+                                                              'preview-flat-iphone.png'))
     print('rendered')

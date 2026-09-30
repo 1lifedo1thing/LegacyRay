@@ -69,5 +69,5 @@ extern NSString * const LRTunnelTickNotification;        /* once a second while 
 
 /* seconds since the tunnel came up, ticking locally between polls */
 - (long)liveUptime;
-- (NSString *)stateTitle;   /* "CONNECTED" etc for the display */
+- (NSString *)stateTitle;   /* "Connected" etc */
 @end

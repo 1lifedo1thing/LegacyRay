@@ -54,6 +54,7 @@ HOST_TESTS += test_shadowsocks
 HOST_TESTS += test_qr_zbar
 HOST_TESTS += test_legacyray
 HOST_TESTS += test_qr_encode
+HOST_TESTS += test_site
 
 all: test
 
@@ -63,6 +64,7 @@ test: $(HOST_TESTS)
 	./test_shadowsocks
 	./test_qr_zbar
 	./test_qr_encode
+	./test_site
 	./test_traffic
 	./test_loop_traffic
 	./test_rules
@@ -212,6 +214,9 @@ test_shadowsocks: test_shadowsocks.c $(CORE)/shadowsocks_client.c $(CORE)/realit
 
 test_qr_zbar: test_qr_zbar.c $(ZBAR_SRC)
 	$(CC) $(ZBAR_CFLAGS) $(CFLAGS) test_qr_zbar.c $(ZBAR_SRC) -o $@
+
+test_site: test_site.c ../app/Sources/Core/lr_site.c ../app/Sources/Core/lr_site.h $(CORE)/rules.c
+	$(CC) $(CFLAGS) -I../app/Sources/Core test_site.c ../app/Sources/Core/lr_site.c $(CORE)/rules.c -o $@
 
 test_qr_encode: test_qr_encode.c ../app/Sources/Core/lr_qr.c $(ZBAR_SRC)
 	$(CC) $(ZBAR_CFLAGS) $(CFLAGS) -I../app/Sources/Core test_qr_encode.c \

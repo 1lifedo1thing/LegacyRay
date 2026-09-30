@@ -43,8 +43,8 @@ void LRBuildDiagnosticReport(void (^done)(NSString *)) {
             [r appendString:@"Application\n-----------\n"];
             [r appendFormat:@"Version: %s (%s)\n", LR_VERSION, LR_BUILD_NUMBER];
             [r appendFormat:@"Device: %@ (%@)\nSystem: %@ %@\n", LRMachine(), [d model], [d systemName], [d systemVersion]];
-            [r appendFormat:@"Theme: %@ · Language: %@\n", [LRPrefs flatSkinActive] ? @"flat" :
-                ([LRPrefs nightSkinActive] ? @"graphite" : @"silver"), LRLanguageName(LRCurrentLanguage())];
+            [r appendFormat:@"Theme: %@ · Language: %@\n", [LRPrefs flatSkinActive] ? @"flat" : @"classic",
+                LRLanguageName(LRCurrentLanguage())];
             [r appendFormat:@"Stealth: %@\n\n", [LRPrefs stealthMode] ? @"on" : @"off"];
             [r appendString:@"Connection\n----------\n"];
             LRTunnel *t = [LRTunnel shared];

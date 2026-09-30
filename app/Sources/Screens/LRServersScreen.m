@@ -47,7 +47,7 @@ static NSString *LRDecodeB64(NSString *text) {
 - (id)init {
     if ((self = [super init])) {
         _text = [[NSMutableString alloc] init];
-        _backgroundStyle = LRBackgroundLinen;
+        _backgroundStyle = LRBackgroundGrouped;
     }
     return self;
 }
@@ -67,17 +67,23 @@ static NSString *LRDecodeB64(NSString *text) {
     _stage = [[UILabel alloc] init];
     _stage.backgroundColor = [UIColor clearColor];
     _stage.font = [LRSkin boldFont:15];
-    _stage.textColor = s->flat ? s->groupInk : s->engrave;
+    _stage.textColor = s->flat ? s->groupInk : s->groupHeader;
+    if (!s->flat) {
+        _stage.shadowColor = s->groupHeaderShadow;
+        _stage.shadowOffset = CGSizeMake(0, 1);
+    }
     _stage.numberOfLines = 2;
     [self.contentView addSubview:_stage];
     _log = [[UITextView alloc] init];
     _log.editable = NO;
     _log.font = [LRSkin monoFont:LRIsPad() ? 12 : 10];
-    _log.backgroundColor = s->flat ? [UIColor whiteColor]
-                                   : [UIColor colorWithRed:0.08f green:0.09f blue:0.08f alpha:1];
-    _log.textColor = s->flat ? [UIColor colorWithWhite:0.15f alpha:1]
-                             : [UIColor colorWithRed:0.55f green:0.95f blue:0.55f alpha:1];
-    if (!s->flat) _log.layer.cornerRadius = 6;
+    _log.backgroundColor = [UIColor whiteColor];
+    _log.textColor = [UIColor colorWithWhite:0.15f alpha:1];
+    if (!s->flat) {
+        _log.layer.cornerRadius = 10;
+        _log.layer.borderColor = s->groupEdge.CGColor;
+        _log.layer.borderWidth = 1;
+    }
     _log.text = _text;
     [self.contentView addSubview:_log];
 }

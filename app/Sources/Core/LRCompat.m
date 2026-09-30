@@ -32,11 +32,12 @@ void LRApplyStatusBarStyle(void) {
     LRSkin *s = [LRSkin current];
     UIStatusBarStyle style;
     if (LRIsIOS7Native())
-        /* 0 dark text, 1 light text (UIStatusBarStyleLightContent on ios 7) */
-        /* light text over graphite, and over the ipad's walnut cabinet */
-        style = (!s->flat && (s->night || LRIsPad())) ? (UIStatusBarStyle)1 : UIStatusBarStyleDefault;
+        /* 0 dark text, 1 light text (UIStatusBarStyleLightContent on ios 7):
+           light over the denim bars */
+        style = s->flat ? UIStatusBarStyleDefault : (UIStatusBarStyle)1;
     else
-        style = UIStatusBarStyleBlackOpaque;
+        /* the black bar ios 6 puts over dark navigation bars */
+        style = s->flat ? UIStatusBarStyleDefault : UIStatusBarStyleBlackOpaque;
     [app setStatusBarStyle:style animated:NO];
 }
 

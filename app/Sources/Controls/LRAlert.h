@@ -1,6 +1,7 @@
-/* modal panels: a small faceplate with screws, an engraved title, a message,
-   optional text fields and hardware buttons. replaces UIAlertView, which has
-   no text input on ios 4 and turns flat on ios 7 */
+/* modal panels: the ios 6 alert (charcoal glass, white rim, glossy keys) or
+   the ios 7 one, with a title, a message, optional text fields and keys.
+   replaces UIAlertView, which has no text input on ios 4 and turns flat on
+   ios 7 */
 #import <UIKit/UIKit.h>
 #import "LRButton.h"
 

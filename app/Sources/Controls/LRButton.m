@@ -2,68 +2,19 @@
 #import "LRDraw.h"
 #import "LRSound.h"
 
-NSString *LRSpaced(NSString *text) {
-    NSMutableString *s = [NSMutableString string];
-    for (NSUInteger i = 0; i < [text length]; ++i) {
-        if (i) [s appendString:@" "];
-        [s appendFormat:@"%C", [text characterAtIndex:i]];
-    }
-    return s;
-}
-
 static NSMutableDictionary *gButtonImages = nil;
 
-static void LRButtonBodyColors(LRButtonStyle style, BOOL pressed, NSArray **colors, CGFloat **locs) {
-    static CGFloat four[4] = { 0, 0.5f, 0.51f, 1 };
-    static CGFloat two[2] = { 0, 1 };
-    LRSkin *s = SKIN;
-    BOOL night = s->night;
-    UIColor *(^W)(CGFloat) = ^UIColor *(CGFloat v) { return [UIColor colorWithWhite:v alpha:1]; };
-    switch (style) {
-        case LRButtonMetal:
-        case LRButtonBack:
-        case LRButtonKey:
-            if (!night) {
-                *colors = pressed
-                    ? [NSArray arrayWithObjects:W(0.70f), W(0.76f), W(0.74f), W(0.82f), nil]
-                    : [NSArray arrayWithObjects:W(0.985f), W(0.87f), W(0.81f), W(0.90f), nil];
-            } else {
-                *colors = pressed
-                    ? [NSArray arrayWithObjects:W(0.14f), W(0.18f), W(0.16f), W(0.22f), nil]
-                    : [NSArray arrayWithObjects:W(0.40f), W(0.25f), W(0.19f), W(0.27f), nil];
-            }
-            *locs = four;
-            return;
-        case LRButtonDark:
-            *colors = pressed
-                ? [NSArray arrayWithObjects:W(0.08f), W(0.12f), W(0.10f), W(0.16f), nil]
-                : [NSArray arrayWithObjects:W(0.36f), W(0.20f), W(0.13f), W(0.21f), nil];
-            *locs = four;
-            return;
-        case LRButtonGreen: {
-            UIColor *a = [UIColor colorWithRed:0.52f green:0.86f blue:0.42f alpha:1];
-            UIColor *b = [UIColor colorWithRed:0.20f green:0.62f blue:0.16f alpha:1];
-            if (pressed) { a = LRColorMix(a, W(0), 0.25f); b = LRColorMix(b, W(0), 0.25f); }
-            *colors = [NSArray arrayWithObjects:a, LRColorMix(a, b, 0.45f), b, LRColorMix(b, a, 0.3f), nil];
-            *locs = four;
-            return;
-        }
-        case LRButtonRed: {
-            UIColor *a = [UIColor colorWithRed:0.95f green:0.45f blue:0.40f alpha:1];
-            UIColor *b = [UIColor colorWithRed:0.72f green:0.12f blue:0.09f alpha:1];
-            if (pressed) { a = LRColorMix(a, W(0), 0.25f); b = LRColorMix(b, W(0), 0.25f); }
-            *colors = [NSArray arrayWithObjects:a, LRColorMix(a, b, 0.45f), b, LRColorMix(b, a, 0.3f), nil];
-            *locs = four;
-            return;
-        }
-        case LRButtonBrass: {
-            UIColor *a = s->brassTop, *b = s->brassBottom;
-            if (pressed) { a = LRColorMix(a, W(0), 0.2f); b = LRColorMix(b, W(0), 0.2f); }
-            *colors = [NSArray arrayWithObjects:a, b, nil];
-            *locs = two;
-            return;
-        }
-    }
+static UIColor *W(CGFloat white, CGFloat alpha) {
+    return [UIColor colorWithWhite:white alpha:alpha];
+}
+
+static UIColor *RGB(unsigned rgb) {
+    return [UIColor colorWithRed:((rgb >> 16) & 0xff) / 255.0f green:((rgb >> 8) & 0xff) / 255.0f
+                            blue:(rgb & 0xff) / 255.0f alpha:1];
+}
+
+static BOOL LRBarStyle(LRButtonStyle style) {
+    return style == LRButtonBar || style == LRButtonBack || style == LRButtonDone;
 }
 
 static void LRAddButtonShape(CGContextRef ctx, CGRect r, CGFloat radius, BOOL back) {
@@ -71,7 +22,7 @@ static void LRAddButtonShape(CGContextRef ctx, CGRect r, CGFloat radius, BOOL ba
         LRAddRoundRect(ctx, r, radius);
         return;
     }
-    CGFloat point = r.size.height * 0.34f;
+    CGFloat point = r.size.height * 0.36f;
     CGFloat minx = r.origin.x, maxx = CGRectGetMaxX(r), miny = r.origin.y, maxy = CGRectGetMaxY(r);
     CGFloat midy = CGRectGetMidY(r);
     CGContextMoveToPoint(ctx, minx, midy);
@@ -84,104 +35,149 @@ static void LRAddButtonShape(CGContextRef ctx, CGRect r, CGFloat radius, BOOL ba
     CGContextClosePath(ctx);
 }
 
-/* flat buttons: text only for the plain styles, a tint outline (lit when
-   selected) for keys, solid fills for the coloured actions */
-static BOOL LRFlatTextOnly(LRButtonStyle style) {
-    return style == LRButtonMetal || style == LRButtonBack || style == LRButtonBrass;
+/* a glossy body: two gradients meeting at the middle, like ios 6 */
+static void LRGloss(CGContextRef ctx, CGRect r, UIColor *top, UIColor *bottom) {
+    CGFloat locs[4] = { 0, 0.5f, 0.5f, 1 };
+    LRFillLinear(ctx, CGPointMake(0, r.origin.y), CGPointMake(0, CGRectGetMaxY(r)),
+                 [NSArray arrayWithObjects:LRColorMix(top, W(1, 1), 0.18f), LRColorMix(top, bottom, 0.35f),
+                  LRColorMix(top, bottom, 0.62f), bottom, nil], locs);
 }
 
-static UIImage *LRFlatButtonImage(LRButtonStyle style, CGFloat height, BOOL pressed, BOOL selected) {
+#pragma mark flat
+
+/* flat buttons: text only for the plain styles, solid fills for the
+   coloured actions */
+static BOOL LRFlatTextOnly(LRButtonStyle style) {
+    return !(style == LRButtonGreen || style == LRButtonRed || style == LRButtonDark || style == LRButtonRow);
+}
+
+static UIImage *LRFlatButtonImage(LRButtonStyle style, CGFloat height, BOOL pressed) {
     if (LRFlatTextOnly(style)) return nil;
     LRSkin *s = SKIN;
-    CGFloat radius = style == LRButtonKey ? 4 : 6;
+    CGFloat radius = style == LRButtonRow ? 0 : 6;
     CGFloat cap = radius + 2;
     CGFloat width = cap * 2 + 1;
-    UIColor *fill = nil, *stroke = nil;
+    UIColor *fill = nil;
     switch (style) {
-        case LRButtonKey:
-            stroke = s->tint;
-            if (selected) fill = s->tint;
-            else if (pressed) fill = LRColorAlpha(s->tint, 0.15f);
-            break;
         case LRButtonGreen: fill = s->ledGreen; break;
         case LRButtonRed: fill = s->ledRed; break;
-        case LRButtonDark: fill = [UIColor colorWithWhite:0.20f alpha:1]; break;
+        case LRButtonDark: fill = W(0.20f, 1); break;
+        case LRButtonRow: fill = pressed ? W(0.85f, 1) : nil; break;
         default: break;
     }
-    if (pressed && style != LRButtonKey && fill) fill = LRColorMix(fill, [UIColor blackColor], 0.18f);
+    if (pressed && style != LRButtonRow && fill) fill = LRColorMix(fill, [UIColor blackColor], 0.18f);
+    if (!fill) return nil;
     UIImage *img = LRImageWithSize(CGSizeMake(width, height), NO, ^(CGContextRef ctx, CGRect rect) {
-        CGRect body = CGRectInset(rect, 0.5f, 0.5f);
-        if (fill) {
-            LRAddRoundRect(ctx, body, radius);
-            [fill setFill];
-            CGContextFillPath(ctx);
+        LRAddRoundRect(ctx, rect, radius);
+        [fill setFill];
+        CGContextFillPath(ctx);
+    });
+    return LRStretchable(img, cap, 0);
+}
+
+#pragma mark classic
+
+static UIImage *LRClassicButtonImage(LRButtonStyle style, CGFloat height, BOOL pressed) {
+    LRSkin *s = SKIN;
+    BOOL back = style == LRButtonBack;
+    if (style == LRButtonRow) {
+        if (!pressed) return nil;
+        UIImage *img = LRImageWithSize(CGSizeMake(3, height), YES, ^(CGContextRef ctx, CGRect rect) {
+            LRFillVertical(ctx, rect, s->groupPressed, s->groupPressedBottom);
+        });
+        return LRStretchable(img, 1, 0);
+    }
+    CGFloat radius = LRBarStyle(style) || style == LRButtonAlert || style == LRButtonAlertDefault
+        ? 5 : MIN(8.0f, height * 0.25f);
+    CGFloat cap = back ? height * 0.36f + radius + 4 : radius + 2;
+    CGFloat width = cap * 2 + 1;
+    UIImage *img = LRImageWithSize(CGSizeMake(width, height), NO, ^(CGContextRef ctx, CGRect rect) {
+        CGRect body = CGRectMake(0, 0, width, height - 1);
+        /* the lip under the key: white on the tables, faint on the denim */
+        BOOL onLight = style == LRButtonMetal || style == LRButtonGreen || style == LRButtonRed;
+        LRAddButtonShape(ctx, CGRectOffset(body, 0, 1), radius, back);
+        CGContextSetRGBFillColor(ctx, 1, 1, 1, onLight ? 0.75f : 0.12f);
+        CGContextFillPath(ctx);
+        CGContextSaveGState(ctx);
+        CGContextSetBlendMode(ctx, kCGBlendModeClear);
+        LRAddButtonShape(ctx, body, radius, back);
+        CGContextFillPath(ctx);
+        CGContextRestoreGState(ctx);
+        CGContextSaveGState(ctx);
+        LRAddButtonShape(ctx, CGRectInset(body, 1, 1), MAX(1, radius - 1), back);
+        CGContextClip(ctx);
+        switch (style) {
+            case LRButtonMetal:
+                if (pressed) LRFillVertical(ctx, body, s->groupPressed, s->groupPressedBottom);
+                else LRFillVertical(ctx, body, W(1, 1), W(0.93f, 1));
+                break;
+            case LRButtonDark:
+                LRGloss(ctx, body, pressed ? W(0.22f, 1) : W(0.40f, 1), pressed ? W(0.08f, 1) : W(0.15f, 1));
+                break;
+            case LRButtonGreen:
+                LRGloss(ctx, body, pressed ? RGB(0x4E9A40) : RGB(0x72C45E), pressed ? RGB(0x1E6A17) : RGB(0x2E8E24));
+                break;
+            case LRButtonRed:
+                LRGloss(ctx, body, pressed ? RGB(0xB8453F) : RGB(0xE66F69), pressed ? RGB(0x8A1712) : RGB(0xB2231C));
+                break;
+            case LRButtonDone:
+                LRGloss(ctx, body, pressed ? RGB(0x3A6BC4) : RGB(0x5B8FE6), pressed ? RGB(0x1B449C) : RGB(0x2458C4));
+                break;
+            case LRButtonBar:
+            case LRButtonBack: {
+                /* translucent, so the denim of the bar shows through */
+                CGContextSetRGBFillColor(ctx, 0, 0, 0, pressed ? 0.5f : 0.28f);
+                CGContextFillRect(ctx, body);
+                CGFloat locs[4] = { 0, 0.5f, 0.5f, 1 };
+                CGFloat a = pressed ? 0.04f : 0.22f, b = pressed ? 0 : 0.07f;
+                LRFillLinear(ctx, CGPointMake(0, 0), CGPointMake(0, body.size.height),
+                             [NSArray arrayWithObjects:W(1, a), W(1, (a + b) / 2), W(1, b), W(1, b * 0.6f), nil],
+                             locs);
+                break;
+            }
+            case LRButtonAlert:
+            case LRButtonAlertDefault: {
+                BOOL primary = style == LRButtonAlertDefault;
+                CGFloat a = pressed ? 0.10f : (primary ? 0.45f : 0.32f);
+                CGFloat b = pressed ? 0.04f : (primary ? 0.20f : 0.10f);
+                CGFloat locs[4] = { 0, 0.5f, 0.5f, 1 };
+                LRFillLinear(ctx, CGPointMake(0, 0), CGPointMake(0, body.size.height),
+                             [NSArray arrayWithObjects:W(1, a), W(1, (a + b) / 2 + 0.04f), W(1, b), W(1, b * 1.2f), nil],
+                             locs);
+                break;
+            }
+            case LRButtonRow:
+                break;
         }
-        if (stroke) {
-            LRAddRoundRect(ctx, body, radius);
-            [stroke setStroke];
-            CGContextSetLineWidth(ctx, 1);
-            CGContextStrokePath(ctx);
+        CGContextRestoreGState(ctx);
+        /* the rim, then a line of light just inside the top */
+        CGContextSaveGState(ctx);
+        LRAddButtonShape(ctx, CGRectInset(body, 0.5f, 0.5f), radius - 0.5f, back);
+        CGFloat rim = style == LRButtonMetal ? 0.35f : (onLight ? 0.55f : 0.75f);
+        CGContextSetRGBStrokeColor(ctx, 0, 0, 0, rim);
+        CGContextSetLineWidth(ctx, 1);
+        CGContextStrokePath(ctx);
+        CGContextRestoreGState(ctx);
+        if (style != LRButtonMetal || !pressed) {
+            CGContextSaveGState(ctx);
+            LRAddButtonShape(ctx, CGRectInset(body, 1, 1), MAX(1, radius - 1), back);
+            CGContextClip(ctx);
+            CGContextSetRGBFillColor(ctx, 1, 1, 1, pressed ? 0.06f : (style == LRButtonMetal ? 0.9f : 0.3f));
+            CGContextFillRect(ctx, CGRectMake(0, 1, width, 1));
+            CGContextRestoreGState(ctx);
         }
     });
     return LRStretchable(img, cap, 0);
 }
 
-static UIImage *LRButtonImage(LRButtonStyle style, CGFloat height, BOOL pressed, BOOL selected) {
-    NSString *key = [NSString stringWithFormat:@"%d.%.0f.%d.%d.%d.%d", style, height, pressed, selected,
-                     SKIN->night, SKIN->flat];
-    UIImage *cached = [gButtonImages objectForKey:key];
-    if (cached) return cached;
-    if (SKIN->flat) {
-        UIImage *flatImage = LRFlatButtonImage(style, height, pressed, selected);
-        if (!gButtonImages) gButtonImages = [[NSMutableDictionary alloc] init];
-        if (flatImage) [gButtonImages setObject:flatImage forKey:key];
-        return flatImage;
-    }
-    BOOL back = style == LRButtonBack;
-    CGFloat radius = style == LRButtonKey ? 4 : MIN(7.0f, height * 0.22f);
-    CGFloat cap = back ? height * 0.34f + radius + 4 : radius + 2;
-    CGFloat width = cap * 2 + 1;
-    UIImage *img = LRImageWithSize(CGSizeMake(width, height), NO, ^(CGContextRef ctx, CGRect rect) {
-        CGRect body = CGRectMake(0.5f, 0.5f, width - 1, height - 2);
-        /* lip below: light on a light plate, faint on a dark one */
-        CGContextSaveGState(ctx);
-        LRAddButtonShape(ctx, CGRectOffset(body, 0, 1), radius, back);
-        CGContextSetRGBFillColor(ctx, 1, 1, 1, SKIN->night ? 0.10f : 0.55f);
-        CGContextFillPath(ctx);
-        LRAddButtonShape(ctx, body, radius, back);
-        CGContextSetRGBFillColor(ctx, 0, 0, 0, 0.62f);
-        CGContextFillPath(ctx);
-        CGRect inner = CGRectInset(body, 1, 1);
-        LRAddButtonShape(ctx, inner, radius - 1, back);
-        CGContextClip(ctx);
-        NSArray *colors = nil;
-        CGFloat *locs = NULL;
-        LRButtonBodyColors(style, pressed || selected, &colors, &locs);
-        LRFillLinear(ctx, CGPointMake(0, inner.origin.y), CGPointMake(0, CGRectGetMaxY(inner)),
-                     colors, locs);
-        if (style == LRButtonKey && selected) {
-            /* a lit key glows from within */
-            LRFillVertical(ctx, inner, LRColorAlpha(SKIN->ledAmber, 0.35f),
-                           LRColorAlpha(SKIN->ledAmber, 0.10f));
-        }
-        if (pressed) {
-            LRFillVertical(ctx, CGRectMake(0, inner.origin.y, width, 6),
-                           [UIColor colorWithWhite:0 alpha:0.35f], [UIColor colorWithWhite:0 alpha:0]);
-        }
-        CGContextRestoreGState(ctx);
-        /* inner top highlight */
-        CGContextSaveGState(ctx);
-        LRAddButtonShape(ctx, CGRectInset(body, 1.5f, 1.5f), radius - 1.5f, back);
-        BOOL candy = style == LRButtonGreen || style == LRButtonRed;
-        CGContextSetRGBStrokeColor(ctx, 1, 1, 1, pressed ? 0.08f : (candy ? 0.45f :
-                                   (SKIN->night || style == LRButtonDark ? 0.12f : 0.6f)));
-        CGContextSetLineWidth(ctx, 1);
-        CGContextStrokePath(ctx);
-        CGContextRestoreGState(ctx);
-    });
-    img = LRStretchable(img, cap, 0);
+static UIImage *LRButtonImage(LRButtonStyle style, CGFloat height, BOOL pressed) {
+    NSString *key = [NSString stringWithFormat:@"%d.%.0f.%d.%d", style, height, pressed, SKIN->flat];
+    id cached = [gButtonImages objectForKey:key];
+    if (cached) return cached == [NSNull null] ? nil : cached;
+    UIImage *img = SKIN->flat ? LRFlatButtonImage(style, height, pressed)
+                              : LRClassicButtonImage(style, height, pressed);
     if (!gButtonImages) gButtonImages = [[NSMutableDictionary alloc] init];
-    [gButtonImages setObject:img forKey:key];
+    [gButtonImages setObject:img ? (id)img : (id)[NSNull null] forKey:key];
     return img;
 }
 
@@ -199,7 +195,7 @@ static UIImage *LRButtonImage(LRButtonStyle style, CGFloat height, BOOL pressed,
 
 - (id)initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:frame])) {
-        self.titleLabel.font = [LRSkin labelFont:12];
+        self.titleLabel.font = [LRSkin boldFont:15];
         self.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
         self.adjustsImageWhenHighlighted = NO;
         self.exclusiveTouch = YES;
@@ -230,31 +226,20 @@ static UIImage *LRButtonImage(LRButtonStyle style, CGFloat height, BOOL pressed,
 - (void)setStyle:(LRButtonStyle)style {
     _style = style;
     [self applyStyle];
-}
-
-- (BOOL)lightText {
-    switch (_style) {
-        case LRButtonDark: case LRButtonGreen: case LRButtonRed: return YES;
-        case LRButtonBrass: return NO;
-        default: return SKIN->night;
-    }
+    if (_glyph) [self setGlyph:[[_glyph retain] autorelease]];
 }
 
 - (void)applyFlatStyle {
     LRSkin *s = SKIN;
     BOOL filled = _style == LRButtonGreen || _style == LRButtonRed || _style == LRButtonDark;
-    UIColor *text = filled ? [UIColor whiteColor] : s->tint;
+    UIColor *text = filled ? [UIColor whiteColor] : (_style == LRButtonRow ? s->groupInk : s->tint);
     [self setTitleColor:text forState:UIControlStateNormal];
-    [self setTitleColor:filled ? LRColorAlpha(text, 0.7f) : LRColorAlpha(text, 0.3f)
+    [self setTitleColor:filled || _style == LRButtonRow ? LRColorAlpha(text, 0.7f) : LRColorAlpha(text, 0.3f)
                forState:UIControlStateHighlighted];
     [self setTitleColor:LRColorAlpha(filled ? text : s->groupMuted, 0.5f) forState:UIControlStateDisabled];
-    if (_style == LRButtonKey) {
-        [self setTitleColor:[UIColor whiteColor] forState:UIControlStateSelected];
-        [self setTitleColor:[UIColor whiteColor] forState:UIControlStateSelected | UIControlStateHighlighted];
-    }
     [self setTitleShadowColor:[UIColor clearColor] forState:UIControlStateNormal];
     self.titleLabel.shadowOffset = CGSizeZero;
-    if (_style == LRButtonBack) self.titleEdgeInsets = UIEdgeInsetsMake(0, 14, 0, 0);
+    self.titleEdgeInsets = _style == LRButtonBack ? UIEdgeInsetsMake(0, 14, 0, 0) : UIEdgeInsetsZero;
     [self updateImages];
     [self setNeedsDisplay];
 }
@@ -286,36 +271,36 @@ static UIImage *LRButtonImage(LRButtonStyle style, CGFloat height, BOOL pressed,
         [self applyFlatStyle];
         return;
     }
-    BOOL light = [self lightText];
-    UIColor *text = _style == LRButtonBrass ? SKIN->brassInk
-        : (light ? [UIColor colorWithWhite:0.93f alpha:1] : [UIColor colorWithWhite:0.20f alpha:1]);
-    UIColor *shadow = light ? [UIColor colorWithWhite:0 alpha:0.75f] : [UIColor colorWithWhite:1 alpha:0.85f];
-    [self setTitleColor:text forState:UIControlStateNormal];
-    [self setTitleColor:LRColorAlpha(text, 0.4f) forState:UIControlStateDisabled];
-    if (_style == LRButtonKey)
-        [self setTitleColor:SKIN->night ? SKIN->ledAmber : [UIColor colorWithRed:0.45f green:0.25f blue:0 alpha:1]
-                   forState:UIControlStateSelected];
-    [self setTitleShadowColor:shadow forState:UIControlStateNormal];
-    self.titleLabel.shadowOffset = CGSizeMake(0, light ? -1 : 1);
-    if (_style == LRButtonBack) self.titleEdgeInsets = UIEdgeInsetsMake(0, 8, 0, 0);
+    LRSkin *s = SKIN;
+    if (_style == LRButtonMetal) {
+        /* the stock rounded rect: blue-grey bold text, white when pressed */
+        [self setTitleColor:s->groupDetail forState:UIControlStateNormal];
+        [self setTitleColor:[UIColor whiteColor] forState:UIControlStateHighlighted];
+        [self setTitleColor:LRColorAlpha(s->groupDetail, 0.4f) forState:UIControlStateDisabled];
+        [self setTitleShadowColor:W(1, 0.9f) forState:UIControlStateNormal];
+        [self setTitleShadowColor:W(0, 0.25f) forState:UIControlStateHighlighted];
+        self.titleLabel.shadowOffset = CGSizeMake(0, 1);
+    } else if (_style == LRButtonRow) {
+        [self setTitleColor:s->groupInk forState:UIControlStateNormal];
+        [self setTitleColor:[UIColor whiteColor] forState:UIControlStateHighlighted];
+        [self setTitleColor:LRColorAlpha(s->groupInk, 0.4f) forState:UIControlStateDisabled];
+        [self setTitleShadowColor:[UIColor clearColor] forState:UIControlStateNormal];
+        self.titleLabel.shadowOffset = CGSizeZero;
+    } else {
+        [self setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [self setTitleColor:W(1, 0.45f) forState:UIControlStateDisabled];
+        [self setTitleShadowColor:W(0, 0.55f) forState:UIControlStateNormal];
+        self.titleLabel.shadowOffset = CGSizeMake(0, -1);
+    }
+    self.titleEdgeInsets = _style == LRButtonBack ? UIEdgeInsetsMake(0, 8, 0, 0) : UIEdgeInsetsZero;
     [self updateImages];
 }
 
 - (void)updateImages {
     CGFloat h = self.bounds.size.height;
     if (h < 8) return;
-    if (SKIN->flat && LRFlatTextOnly(_style)) {
-        [self setBackgroundImage:nil forState:UIControlStateNormal];
-        [self setBackgroundImage:nil forState:UIControlStateHighlighted];
-        return;
-    }
-    [self setBackgroundImage:LRButtonImage(_style, h, NO, NO) forState:UIControlStateNormal];
-    [self setBackgroundImage:LRButtonImage(_style, h, YES, NO) forState:UIControlStateHighlighted];
-    if (_style == LRButtonKey) {
-        [self setBackgroundImage:LRButtonImage(_style, h, NO, YES) forState:UIControlStateSelected];
-        [self setBackgroundImage:LRButtonImage(_style, h, YES, YES)
-                        forState:UIControlStateSelected | UIControlStateHighlighted];
-    }
+    [self setBackgroundImage:LRButtonImage(_style, h, NO) forState:UIControlStateNormal];
+    [self setBackgroundImage:LRButtonImage(_style, h, YES) forState:UIControlStateHighlighted];
 }
 
 - (void)setFrame:(CGRect)frame {
@@ -327,11 +312,29 @@ static UIImage *LRButtonImage(LRButtonStyle style, CGFloat height, BOOL pressed,
 - (void)setGlyph:(UIImage *)glyph {
     [_glyph release];
     _glyph = [glyph retain];
-    [self setImage:glyph forState:UIControlStateNormal];
+    BOOL dark = _style != LRButtonMetal && _style != LRButtonRow;
+    UIImage *shown = glyph && !SKIN->flat && dark ? LRShadowedGlyph(glyph, W(0, 0.55f)) : glyph;
+    [self setImage:shown forState:UIControlStateNormal];
 }
 @end
 
 #pragma mark glyphs
+
+UIImage *LRShadowedGlyph(UIImage *glyph, UIColor *shadow) {
+    if (!glyph) return nil;
+    CGSize size = glyph.size;
+    /* the glyph's shape in the shadow colour */
+    UIImage *silhouette = LRImageWithSize(size, NO, ^(CGContextRef ctx, CGRect rect) {
+        [glyph drawInRect:rect];
+        CGContextSetBlendMode(ctx, kCGBlendModeSourceIn);
+        [shadow setFill];
+        CGContextFillRect(ctx, rect);
+    });
+    return LRImageWithSize(CGSizeMake(size.width, size.height + 1), NO, ^(CGContextRef ctx, CGRect rect) {
+        [silhouette drawAtPoint:CGPointMake(0, 0)];
+        [glyph drawAtPoint:CGPointMake(0, 1)];
+    });
+}
 
 static UIImage *LRGlyph(CGFloat size, void (^draw)(CGContextRef, CGFloat)) {
     return LRImageWithSize(CGSizeMake(size, size), NO, ^(CGContextRef ctx, CGRect rect) {
@@ -342,16 +345,16 @@ static UIImage *LRGlyph(CGFloat size, void (^draw)(CGContextRef, CGFloat)) {
 UIImage *LRGlyphPlus(CGFloat size, UIColor *color) {
     return LRGlyph(size, ^(CGContextRef ctx, CGFloat s) {
         [color setFill];
-        CGFloat t = s * 0.16f;
-        CGContextFillRect(ctx, CGRectMake(s * 0.15f, (s - t) / 2, s * 0.7f, t));
-        CGContextFillRect(ctx, CGRectMake((s - t) / 2, s * 0.15f, t, s * 0.7f));
+        CGFloat t = roundf(s * 0.15f * 2) / 2;
+        CGContextFillRect(ctx, CGRectMake(s * 0.14f, (s - t) / 2, s * 0.72f, t));
+        CGContextFillRect(ctx, CGRectMake((s - t) / 2, s * 0.14f, t, s * 0.72f));
     });
 }
 
 UIImage *LRGlyphGear(CGFloat size, UIColor *color) {
     return LRGlyph(size, ^(CGContextRef ctx, CGFloat s) {
         [color setFill];
-        CGFloat c = s / 2, ro = s * 0.46f, ri = s * 0.34f;
+        CGFloat c = s / 2, ro = s * 0.48f, ri = s * 0.36f;
         int teeth = 8;
         for (int i = 0; i < teeth * 2; ++i) {
             CGFloat a0 = (CGFloat)M_PI * 2 * i / (teeth * 2), a1 = (CGFloat)M_PI * 2 * (i + 1) / (teeth * 2);
@@ -361,14 +364,8 @@ UIImage *LRGlyphGear(CGFloat size, UIColor *color) {
             CGContextAddLineToPoint(ctx, c + cosf(a1) * r, c + sinf(a1) * r);
         }
         CGContextClosePath(ctx);
-        CGContextAddEllipseInRect(ctx, CGRectMake(c - s * 0.14f, c - s * 0.14f, s * 0.28f, s * 0.28f));
+        CGContextAddEllipseInRect(ctx, CGRectMake(c - s * 0.15f, c - s * 0.15f, s * 0.30f, s * 0.30f));
         CGContextEOFillPath(ctx);
-    });
-}
-
-UIImage *LRGlyphSeek(CGFloat size, int direction, UIColor *color) {
-    return LRGlyph(size, ^(CGContextRef ctx, CGFloat s) {
-        LRDrawSeekGlyph(ctx, CGPointMake(s / 2, s / 2), s * 0.5f, direction, color);
     });
 }
 

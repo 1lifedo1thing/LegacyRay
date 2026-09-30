@@ -26,20 +26,25 @@
         for (NSValue *v in separators) CGContextFillRect(ctx, [v CGRectValue]);
         return;
     }
+    /* the ios 6 alert in charcoal: a dark glassy panel, a white rim, a
+       sheen over the top */
+    CGRect body = CGRectInset(b, 1, 1);
     CGContextSaveGState(ctx);
-    LRAddRoundRect(ctx, b, 12);
+    LRAddRoundRect(ctx, body, 9);
     CGContextClip(ctx);
-    LRDrawBrushedMetal(ctx, b, s->plateTop, s->plateBottom, s->hairLight, s->hairDark, 33);
-    LRDrawNoise(ctx, b, 0.08f);
+    LRFillVertical(ctx, body, [UIColor colorWithRed:0.23f green:0.24f blue:0.26f alpha:0.96f],
+                   [UIColor colorWithRed:0.10f green:0.11f blue:0.12f alpha:0.96f]);
+    CGFloat gw = body.size.width * 1.6f;
+    CGRect gloss = CGRectMake(CGRectGetMidX(body) - gw / 2, body.origin.y - gw + 30, gw, gw);
+    CGContextAddEllipseInRect(ctx, gloss);
+    CGContextClip(ctx);
+    LRFillVertical(ctx, CGRectMake(body.origin.x, body.origin.y, body.size.width, 30),
+                   [UIColor colorWithWhite:1 alpha:0.16f], [UIColor colorWithWhite:1 alpha:0.05f]);
     CGContextRestoreGState(ctx);
-    LRAddRoundRect(ctx, CGRectInset(b, 0.5f, 0.5f), 12);
-    CGContextSetRGBStrokeColor(ctx, 1, 1, 1, s->night ? 0.12f : 0.7f);
-    CGContextSetLineWidth(ctx, 1);
+    LRAddRoundRect(ctx, CGRectInset(b, 1.5f, 1.5f), 9);
+    CGContextSetRGBStrokeColor(ctx, 1, 1, 1, 0.85f);
+    CGContextSetLineWidth(ctx, 2);
     CGContextStrokePath(ctx);
-    LRDrawScrew(ctx, CGPointMake(11, 11), 3.5f, 0.5f);
-    LRDrawScrew(ctx, CGPointMake(b.size.width - 11, 11), 3.5f, 1.9f);
-    LRDrawScrew(ctx, CGPointMake(11, b.size.height - 11), 3.5f, 2.6f);
-    LRDrawScrew(ctx, CGPointMake(b.size.width - 11, b.size.height - 11), 3.5f, 1.1f);
 }
 @end
 
@@ -78,10 +83,13 @@
 
 - (void)addButton:(NSString *)title style:(LRButtonStyle)style action:(void (^)(LRAlert *))action {
     BOOL flat = SKIN->flat;
-    LRButton *b = [LRButton buttonWithStyle:flat ? LRButtonMetal : style title:title action:nil];
-    b.frame = CGRectMake(0, 0, 100, 40);
+    /* classic: plain keys are alert keys, the green one the alert's primary key */
+    LRButtonStyle shown = flat ? LRButtonMetal
+        : (style == LRButtonGreen ? LRButtonAlertDefault : (style == LRButtonRed ? LRButtonRed : LRButtonAlert));
+    LRButton *b = [LRButton buttonWithStyle:shown title:title action:nil];
+    b.frame = CGRectMake(0, 0, 100, 43);
     b.titleLabel.font = flat ? (style == LRButtonMetal ? [LRSkin bodyFont:17] : [LRSkin boldFont:17])
-                             : [LRSkin boldFont:14];
+                             : [LRSkin boldFont:17];
     if (flat && style == LRButtonRed) [b setTitleColor:SKIN->ledRed forState:UIControlStateNormal];
     b.tag = (NSInteger)[_buttons count];
     [b addTarget:self action:@selector(buttonTapped:) forControlEvents:UIControlEventTouchUpInside];
@@ -129,7 +137,7 @@
 }
 
 - (CGFloat)panelWidth {
-    return MIN(LRIsPad() ? 360.0f : 290.0f, self.bounds.size.width - 20);
+    return MIN(284.0f, self.bounds.size.width - 20);
 }
 
 /* the ios 7 alert: text, then a row or a column of text buttons divided by
@@ -180,11 +188,11 @@
         return;
     }
     CGFloat w = [self panelWidth];
-    CGFloat pad = 20, y = 22;
+    CGFloat pad = 16, y = 18;
     CGFloat inner = w - pad * 2;
     CGSize ts = [_titleLabel.text sizeWithFont:_titleLabel.font constrainedToSize:CGSizeMake(inner, 200)];
     _titleLabel.frame = CGRectMake(pad, y, inner, ceilf(ts.height));
-    y += ceilf(ts.height) + 8;
+    y += ceilf(ts.height) + 6;
     if ([_messageLabel.text length]) {
         CGFloat maxMsg = self.bounds.size.height * 0.45f;
         CGSize ms = [_messageLabel.text sizeWithFont:_messageLabel.font
@@ -193,28 +201,29 @@
         y += ceilf(ms.height) + 12;
     }
     for (UITextField *f in _fields) {
-        f.frame = CGRectMake(pad, y, inner, 36);
-        y += 44;
+        f.frame = CGRectMake(pad - 4, y, inner + 8, 31);
+        y += 39;
     }
     y += 4;
     NSUInteger n = [_buttons count];
     BOOL row = n == 2;
     if (row) {
-        CGFloat bw = (inner - 10) / 2;
+        CGFloat bw = (inner + 8 - 10) / 2;
         for (NSUInteger i = 0; i < n; ++i)
-            [[_buttons objectAtIndex:i] setFrame:CGRectMake(pad + i * (bw + 10), y, bw, 42)];
-        y += 42;
+            [[_buttons objectAtIndex:i] setFrame:CGRectMake(pad - 4 + i * (bw + 10), y, bw, 43)];
+        y += 43;
     } else {
         for (LRButton *b in _buttons) {
-            b.frame = CGRectMake(pad, y, inner, 42);
-            y += 50;
+            b.frame = CGRectMake(pad - 4, y, inner + 8, 43);
+            y += 51;
         }
         if (n) y -= 8;
     }
-    y += 20;
+    y += 16;
     CGFloat avail = self.bounds.size.height - _keyboardHeight;
     CGFloat py = roundf(MAX(10, (avail - y) / 2));
     _panel.frame = CGRectMake(roundf((self.bounds.size.width - w) / 2), py, w, y);
+    _panel.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:_panel.bounds cornerRadius:10].CGPath;
     [_panel setNeedsDisplay];
 }
 
@@ -231,36 +240,36 @@
     if (![_buttons count]) [self addButton:L(@"OK") style:LRButtonMetal action:nil];
     self.frame = host.bounds;
     _dim = [[UIView alloc] initWithFrame:self.bounds];
-    _dim.backgroundColor = [UIColor colorWithWhite:0 alpha:SKIN->flat ? 0.4f : 0.55f];
+    _dim.backgroundColor = [UIColor colorWithWhite:0 alpha:SKIN->flat ? 0.4f : 0.45f];
     [self addSubview:_dim];
     _panel = [[LRAlertPanel alloc] initWithFrame:CGRectZero];
     _panel.backgroundColor = [UIColor clearColor];
     _panel.contentMode = UIViewContentModeRedraw;
     _panel.layer.shadowColor = [UIColor blackColor].CGColor;
-    _panel.layer.shadowOpacity = SKIN->flat ? 0 : 0.7f;
-    _panel.layer.shadowRadius = 10;
+    _panel.layer.shadowOpacity = SKIN->flat ? 0 : 0.6f;
+    _panel.layer.shadowRadius = 8;
     _panel.layer.shadowOffset = CGSizeMake(0, 4);
     [self addSubview:_panel];
     LRSkin *s = SKIN;
     _titleLabel = [[UILabel alloc] init];
     _titleLabel.text = _title;
-    _titleLabel.font = s->flat ? [LRSkin boldFont:17] : [LRSkin titleFont:18];
+    _titleLabel.font = s->flat ? [LRSkin boldFont:17] : [LRSkin boldFont:18];
     _titleLabel.numberOfLines = 0;
     _titleLabel.textAlignment = NSTextAlignmentCenter;
     _titleLabel.backgroundColor = [UIColor clearColor];
-    _titleLabel.textColor = s->engrave;
-    _titleLabel.shadowColor = s->engraveShadow;
-    _titleLabel.shadowOffset = CGSizeMake(0, s->engraveOffset);
+    _titleLabel.textColor = s->flat ? s->groupInk : [UIColor whiteColor];
+    _titleLabel.shadowColor = s->flat ? nil : [UIColor colorWithWhite:0 alpha:0.6f];
+    _titleLabel.shadowOffset = CGSizeMake(0, -1);
     [_panel addSubview:_titleLabel];
     _messageLabel = [[UILabel alloc] init];
     _messageLabel.text = _message;
-    _messageLabel.font = [LRSkin bodyFont:s->flat ? 13 : 14];
+    _messageLabel.font = [LRSkin bodyFont:s->flat ? 13 : 16];
     _messageLabel.numberOfLines = 0;
     _messageLabel.textAlignment = NSTextAlignmentCenter;
     _messageLabel.backgroundColor = [UIColor clearColor];
-    _messageLabel.textColor = s->flat ? s->groupInk : LRColorAlpha(s->engrave, 0.85f);
-    _messageLabel.shadowColor = s->engraveShadow;
-    _messageLabel.shadowOffset = CGSizeMake(0, s->engraveOffset);
+    _messageLabel.textColor = s->flat ? s->groupInk : [UIColor whiteColor];
+    _messageLabel.shadowColor = s->flat ? nil : [UIColor colorWithWhite:0 alpha:0.6f];
+    _messageLabel.shadowOffset = CGSizeMake(0, -1);
     [_panel addSubview:_messageLabel];
     for (UITextField *f in _fields) [_panel addSubview:f];
     for (LRButton *b in _buttons) [_panel addSubview:b];

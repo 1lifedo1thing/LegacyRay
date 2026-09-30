@@ -96,7 +96,7 @@ NSString *LRAWGSetField(NSString *config, NSString *key, NSString *value) {
     }
     if ([rows count])
         [sections addObject:[LRSectionSpec header:L(@"Profiles") rows:rows
-                                           footer:L(@"POWER starts the chosen profile while AmneziaWG is in use. Tap a profile for its settings.")]];
+                                           footer:L(@"The big button starts the chosen profile while AmneziaWG is in use. Tap a profile for its settings.")]];
     if ([profiles count])
         [sections addObject:[LRSectionSpec header:nil rows:[NSArray arrayWithObjects:
             [LRRow toggle:L(@"Use AmneziaWG") on:useAWG changed:^(BOOL on) {
@@ -214,7 +214,7 @@ NSString *LRAWGSetField(NSString *config, NSString *key, NSString *value) {
         [state addObject:[LRRow value:L(@"Routes") detail:full ? L(@"All traffic")
                                       : [NSString stringWithFormat:L(@"%lu networks"), (unsigned long)n] action:nil]];
     }
-    [state addObject:[LRRow value:L(@"State") detail:live ? [t stateTitle] : (_check ? _check : L(@"STANDBY"))
+    [state addObject:[LRRow value:L(@"State") detail:live ? [t stateTitle] : (_check ? _check : L(@"Not Connected"))
                            action:nil]];
     [sections addObject:[LRSectionSpec header:_profile.name rows:state footer:nil]];
 

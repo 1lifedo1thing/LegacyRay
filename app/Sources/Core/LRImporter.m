@@ -284,7 +284,7 @@ static int LRTrailingInt(NSString *reply) {
         [LRAWGProfiles setActive:profile];
         [LRPrefs setSelectedBackend:LRBackendAmneziaWG];
         LRLog(@"import", @"amneziawg profile saved");
-        [LRToast showSuccess:[NSString stringWithFormat:L(@"Profile “%@” saved. Press POWER to connect."),
+        [LRToast showSuccess:[NSString stringWithFormat:L(@"Profile “%@” saved. Tap the big button to connect."),
                               profile.name]];
         [[LRCatalog shared] reload];
     }];
