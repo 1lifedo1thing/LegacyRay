@@ -55,6 +55,7 @@ HOST_TESTS += test_qr_zbar
 HOST_TESTS += test_legacyray
 HOST_TESTS += test_qr_encode
 HOST_TESTS += test_site
+HOST_TESTS += test_dialer
 
 all: test
 
@@ -65,6 +66,7 @@ test: $(HOST_TESTS)
 	./test_qr_zbar
 	./test_qr_encode
 	./test_site
+	./test_dialer
 	./test_traffic
 	./test_loop_traffic
 	./test_rules
@@ -139,6 +141,10 @@ test_url_headers: test_url_headers.c $(CORE)/url.c $(CORE)/net_safe.c $(CORE)/ur
 
 test_net_safe: test_net_safe.c $(NET_SAFE) $(CORE)/net_safe.h
 	$(CC) $(CFLAGS) test_net_safe.c $(NET_SAFE) -o $@
+
+test_dialer: test_dialer.c $(DAEMON)/dialer.c $(DAEMON)/dialer.h $(NET_SAFE)
+	$(CC) $(CFLAGS) $(THREAD_CFLAGS) -I$(DAEMON) test_dialer.c $(DAEMON)/dialer.c $(NET_SAFE) \
+	      -o $@ $(THREAD_LDFLAGS)
 
 test_subinfo: test_subinfo.c $(CORE)/subfetch.c $(CORE)/subfetch.h
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) -DSENKO_HOST_TEST -I$(DAEMON) test_subinfo.c \

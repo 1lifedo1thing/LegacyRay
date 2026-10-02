@@ -93,7 +93,7 @@ static void LRRoutingChanged(void) {
     NSArray *connection = [NSArray arrayWithObjects:
         [self daemonToggle:L(@"Reconnect automatically") key:@"auto_reconnect" fallback:YES routing:NO],
         [self daemonToggle:L(@"Connect at startup") key:@"auto_connect" fallback:NO routing:NO],
-        [self daemonToggle:L(@"Failover to the next station") key:@"failover" fallback:NO routing:NO],
+        [self daemonToggle:L(@"Failover to the next server") key:@"failover" fallback:NO routing:NO],
         [LRRow value:L(@"Reconnect attempts")
               detail:attempts == 0 ? L(@"Until it works") : [NSString stringWithFormat:@"%ld", (long)attempts]
               action:^(LRRow *r, UIView *c) {
@@ -111,7 +111,7 @@ static void LRRoutingChanged(void) {
             }];
         }], nil];
     [sections addObject:[LRSectionSpec header:L(@"Connection") rows:connection
-                                       footer:L(@"Failover walks the same subscription when a station will not come up.")]];
+                                       footer:L(@"Failover walks the same subscription when a server will not come up.")]];
 
     /* routing */
     BOOL routing = [DS() boolForKey:@"rules_enabled" fallback:YES];
@@ -286,8 +286,8 @@ static void LRRoutingChanged(void) {
             }];
         }],
         [LRRow toggle:L(@"Sounds") on:[LRPrefs soundEffects] changed:^(BOOL on) { [LRPrefs setSoundEffects:on]; }],
-        [LRRow value:L(@"Sort stations") detail:[sorts objectAtIndex:[LRPrefs sortMode]] action:^(LRRow *r, UIView *c) {
-            [me choose:L(@"Sort stations") options:sorts selected:[LRPrefs sortMode] picked:^(NSInteger i) {
+        [LRRow value:L(@"Sort servers") detail:[sorts objectAtIndex:[LRPrefs sortMode]] action:^(LRRow *r, UIView *c) {
+            [me choose:L(@"Sort servers") options:sorts selected:[LRPrefs sortMode] picked:^(NSInteger i) {
                 [LRPrefs setSortMode:(LRSortMode)i];
             }];
         }], nil];
@@ -536,7 +536,7 @@ static void LRRoutingChanged(void) {
             [DS() setBool:on forKey:@"bypass_lan"];
             LRRoutingChanged();
         }], nil]
-                                       footer:L(@"When disabled, all supported traffic uses the selected station. Local networks means LAN, link-local and carrier-grade NAT addresses.")]];
+                                       footer:L(@"When disabled, all supported traffic uses the selected server. Local networks means LAN, link-local and carrier-grade NAT addresses.")]];
     NSString *activeProfile = [LRRoutingProfiles activeName];
     [sections addObject:[LRSectionSpec header:nil rows:[NSArray arrayWithObjects:
         [LRRow value:L(@"Routing profiles") detail:activeProfile ? activeProfile : L(@"None")

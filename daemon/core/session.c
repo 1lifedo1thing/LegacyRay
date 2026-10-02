@@ -142,18 +142,16 @@ static sess_status_t send_vision_first(session_t *s,
 
     uint8_t blk[8192 + VISION_MAX_OVERHEAD];
     size_t blk_len = 0;
-    int sent_mode_switch = 0;
+    int sent_direct = 0;
     if (content > 0) {
         senko_upload_in_feed(s, payload, content);
         int was_direct = s->vwrap.direct_sent;
-        int was_end = s->vwrap.end_sent;
         if (vision_wrap(&s->vwrap, payload, content,
                         blk, sizeof blk, &blk_len) != 0) {
             s->state = SESS_ERROR;
             return SESS_ERR;
         }
-        sent_mode_switch = (!was_direct && s->vwrap.direct_sent) ||
-                            (!was_end && s->vwrap.end_sent);
+        sent_direct = !was_direct && s->vwrap.direct_sent;
     } else {
         if (vision_wrap_bootstrap(&s->vwrap, blk, sizeof blk, &blk_len) != 0) {
             s->state = SESS_ERROR;
@@ -179,9 +177,11 @@ static sess_status_t send_vision_first(session_t *s,
     if (s->state == SESS_ERROR) return SESS_ERR;
 
     s->state = SESS_VLESS_RESP;
-/* enable bulk aead when vision requests direct mode immediately */
-    if (sent_mode_switch)
-        request_upstream_direct(s, "vision first framing end", 1);
+/* only DIRECT (inner tls 1.3) leaves the outer tls. END (tls 1.2, plain
+   http) just drops the framing: xray keeps reading those bytes through the
+   outer tls, and bare ones make it answer with a protocol_version alert */
+    if (sent_direct)
+        request_upstream_direct(s, "vision first DIRECT", 1);
     if (taken) *taken = content;
     senko_trace_sess(s, content ? "vision_first_payload" : "vision_first_bootstrap",
                      content ? "header+payload" : "header+bootstrap");
@@ -235,15 +235,13 @@ static size_t push_app(session_t *s, const uint8_t *buf, size_t len) {
     uint8_t blk[8192 + VISION_MAX_OVERHEAD];
     size_t bn = 0;
     int was_direct = s->vwrap.direct_sent;
-    int was_end = s->vwrap.end_sent;
     if (vision_wrap(&s->vwrap, buf, content, blk, sizeof blk, &bn) != 0) return 0;
-    int sent_mode_switch = (!was_direct && s->vwrap.direct_sent) ||
-                           (!was_end && s->vwrap.end_sent);
+    int sent_direct = !was_direct && s->vwrap.direct_sent;
 
     push_remote(s, blk, bn);
     if (s->state == SESS_ERROR) return 0;
-    if (sent_mode_switch)
-        request_upstream_direct(s, "local framing end", 1);
+    if (sent_direct)
+        request_upstream_direct(s, "local DIRECT", 1);
 #ifndef SENKO_RELEASE
     s->trace_app_tx += (uint64_t)content;
 #endif

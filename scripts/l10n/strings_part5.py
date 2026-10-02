@@ -1,6 +1,6 @@
 # the ios 6 redesign and the two site modes
 T = [
-("Tap + to add a server or a subscription, then tap the big button. Hold a station for more.", "Нажмите +, чтобы добавить сервер или подписку, затем нажмите большую кнопку. Удерживайте станцию — там есть ещё действия.", "点按 + 添加服务器或订阅，然后点按大按钮。长按电台可查看更多操作。"),
+("Tap + to add a server or a subscription, then tap the big button. Hold a server for more.", "Нажмите +, чтобы добавить сервер или подписку, затем нажмите большую кнопку. Удерживайте сервер — там есть ещё действия.", "点按 + 添加服务器或订阅，然后点按大按钮。长按服务器可查看更多操作。"),
 ("ON", "ВКЛ", "开"),
 ("OFF", "ВЫКЛ", "关"),
 ("Connecting…", "Подключение…", "正在连接…"),
@@ -10,9 +10,9 @@ T = [
 ("Connection Failed", "Не удалось подключиться", "连接失败"),
 ("The background service is not running.", "Фоновая служба не запущена.", "后台服务未运行。"),
 ("The server did not answer.", "Сервер не ответил.", "服务器没有响应。"),
-("Add a station to begin.", "Добавьте станцию, чтобы начать.", "添加一个电台即可开始。"),
+("Add a server to begin.", "Добавьте сервер, чтобы начать.", "添加一个服务器即可开始。"),
 ("Tap the button to connect.", "Нажмите кнопку, чтобы подключиться.", "点按按钮即可连接。"),
-("Choose a station", "Выберите станцию", "选择电台"),
+("Choose a server", "Выберите сервер", "选择服务器"),
 ("Tap to add a link, a QR code or a subscription", "Нажмите, чтобы добавить ссылку, QR-код или подписку", "点按以添加链接、二维码或订阅"),
 ("%@ added", "Добавлено: %@", "已添加 %@"),
 ("The site was not accepted", "Сайт не принят", "该网站未被接受"),
@@ -38,6 +38,6 @@ T = [
 ("Profile “%@” saved. Tap the big button to connect.", "Профиль «%@» сохранён. Нажмите большую кнопку, чтобы подключиться.", "配置“%@”已保存。点按大按钮即可连接。"),
 ("The big button starts the chosen profile while AmneziaWG is in use. Tap a profile for its settings.", "Когда выбран AmneziaWG, большая кнопка запускает выбранный профиль. Нажмите на профиль, чтобы открыть его настройки.", "使用 AmneziaWG 时，大按钮会启动所选配置。点按配置可查看其设置。"),
 ("A full-device VLESS, Trojan, Shadowsocks, SOCKS and AmneziaWG client for jailbroken iOS 4 to 7.", "Клиент VLESS, Trojan, Shadowsocks, SOCKS и AmneziaWG для всего устройства — для iOS 4–7 с джейлбрейком.", "适用于越狱 iOS 4 至 7 的全设备 VLESS、Trojan、Shadowsocks、SOCKS 和 AmneziaWG 客户端。"),
-("Tap + (on the main screen or in the stations) and paste from the clipboard, scan a QR code, type or paste manually, add a subscription URL or pick a file. vless://, trojan://, ss://, socks5://, happ:// links, subscription URLs, base64 lists, Xray and sing-box JSON, Clash YAML, WireGuard / AmneziaWG profiles and Karing backups (zip or LAN send QR) all work.", "Нажмите + (на главном экране или в списке станций) и вставьте из буфера обмена, отсканируйте QR-код, введите вручную, добавьте ссылку подписки или выберите файл. Подходят ссылки vless://, trojan://, ss://, socks5://, happ://, ссылки подписок, списки в base64, JSON Xray и sing-box, YAML Clash, профили WireGuard / AmneziaWG и резервные копии Karing (zip или QR передачи по локальной сети).", "点按 +（主屏幕或电台列表中）并从剪贴板粘贴、扫描二维码、手动输入、添加订阅链接或选择文件。支持 vless://、trojan://、ss://、socks5://、happ:// 链接、订阅链接、base64 列表、Xray 和 sing-box JSON、Clash YAML、WireGuard / AmneziaWG 配置以及 Karing 备份（zip 或局域网发送二维码）。"),
+("Tap + (on the main screen or in the server list) and paste from the clipboard, scan a QR code, type or paste manually, add a subscription URL or pick a file. vless://, trojan://, ss://, socks5://, happ:// links, subscription URLs, base64 lists, Xray and sing-box JSON, Clash YAML, WireGuard / AmneziaWG profiles and Karing backups (zip or LAN send QR) all work.", "Нажмите + (на главном экране или в списке серверов) и вставьте из буфера обмена, отсканируйте QR-код, введите вручную, добавьте ссылку подписки или выберите файл. Подходят ссылки vless://, trojan://, ss://, socks5://, happ://, ссылки подписок, списки в base64, JSON Xray и sing-box, YAML Clash, профили WireGuard / AmneziaWG и резервные копии Karing (zip или QR передачи по локальной сети).", "点按 +（主屏幕或服务器列表中）并从剪贴板粘贴、扫描二维码、手动输入、添加订阅链接或选择文件。支持 vless://、trojan://、ss://、socks5://、happ:// 链接、订阅链接、base64 列表、Xray 和 sing-box JSON、Clash YAML、WireGuard / AmneziaWG 配置以及 Karing 备份（zip 或局域网发送二维码）。"),
 ("%@ selected", "Выбрано: %@", "已选择 %@"),
 ]

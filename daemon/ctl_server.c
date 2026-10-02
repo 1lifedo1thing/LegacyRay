@@ -44,6 +44,11 @@
 /* one connect has to answer while a client is still waiting, and every attempt
    carries a dns lookup, a handshake and a verify probe */
 #define CTL_FAILOVER_MAX_TRIES 8
+/* one try can take ~25s on an old phone (firewall ladder, then the tunnel
+   probe), and the app gives up on CONNECT after 60s. no new failover try
+   starts past this point, so the answer always arrives with the real reason
+   instead of the app's timeout */
+#define CTL_FAILOVER_BUDGET_MS 20000
 
 static int awg_tunnel_running(void) {
     FILE *f = fopen(AWG_PID_PATH, "r");
@@ -994,7 +999,13 @@ static int connect_with_tunnel_pick(ctl_server_t *s, ctl_client_t *c, int start_
             client_write(c, ev, en);
     }
 
+    long started = ctl_now_ms();
     for (size_t off = 0; off < tries; ++off) {
+        if (off > 0 && ctl_now_ms() - started > CTL_FAILOVER_BUDGET_MS) {
+            fprintf(stderr, "legacyrayd: failover stopped after %zu of %zu tries: time budget spent\n",
+                    off, tries);
+            break;
+        }
 /* a timed-out client cannot own routing state it can no longer observe */
         if (c && !client_still_open(c)) {
             ctl_action_t stop = { .kind = CTL_ACT_STOP };

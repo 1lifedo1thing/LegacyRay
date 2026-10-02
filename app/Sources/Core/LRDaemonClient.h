@@ -6,6 +6,11 @@
 #import "LRModels.h"
 
 #define LR_DAEMON_SOCKET @"/var/tmp/legacyrayd.sock"
+/* the client adds one of these lines to a CONNECT or DISCONNECT reply that
+   stopped before its final state: the daemon closed the socket, or the wait
+   ran out */
+#define LR_REPLY_CLOSED  "LRCLIENT closed"
+#define LR_REPLY_TIMEOUT "LRCLIENT timeout"
 
 /* "connected" / "connecting" / "idle" / "error" out of a STATE reply */
 NSString *LRStateFromReply(NSString *reply, long *uptime);

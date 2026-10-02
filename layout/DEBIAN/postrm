@@ -18,6 +18,7 @@ if [ "$1" = purge ]; then
   # otherwise burn a slot on every reinstall
   rm -f /var/mobile/Library/Preferences/com.legacyray.hwid /var/root/Library/Preferences/legacyray.cfg
   rm -rf /var/mobile/Library/Preferences/LegacyRay
-  rm -f /var/log/legacyray-system.log /var/log/legacyraytlsfix.log /var/log/legacyray-kick.log
+  rm -f /var/log/legacyray-system.log /var/log/legacyraytlsfix.log /var/log/legacyray-kick.log \
+        /var/log/legacyray-install.log
 fi
 exit 0

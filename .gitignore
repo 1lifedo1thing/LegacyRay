@@ -1,5 +1,9 @@
 # build outputs
 build/
+# host builds of the daemon (daemon/Makefile)
+daemon/legacyrayd
+daemon/legacyrayctl
+daemon/legacyrayawgd
 app/build/
 daemon/build/
 tweaks/*/build/

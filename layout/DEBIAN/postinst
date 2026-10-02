@@ -90,11 +90,62 @@ fi
 
 echo "LegacyRay installed. Control socket: /var/tmp/legacyrayd.sock"
 
-# backgrounded: ios 6 uicache can deadlock against the running old app
-( uicache >/dev/null 2>&1 || true ) </dev/null &
+# the icon appears once uicache has rebuilt the cache springboard reads when it
+# starts, and on an old phone that takes many seconds. a springboard restarted
+# before then comes up without the icon, so the restart waits for uicache. all
+# of it is backgrounded: ios 6 uicache can deadlock against the running old app
+# and dpkg must not wait for that, hence the time limit. what happened goes to a
+# log the next install overwrites
+CACHE=/var/mobile/Library/Caches/com.apple.mobile.installation.plist
+INSTALL_LOG=/var/log/legacyray-install.log
+UICACHE_DONE=/var/log/legacyray-uicache.done
 
-# the status bar hook loads into springboard, so a fresh install restarts it
-if [ "${SENKO_SKIP_RESPRING:-0}" != "1" ] && [ -z "$2" ]; then
-  ( sleep 2; killall -9 SpringBoard >/dev/null 2>&1 || true ) </dev/null >/dev/null 2>&1 &
+# 0: the cache lists the app, 1: it does not, 2: the cache cannot be read this
+# way (no file, or not even safari is in it), so it says nothing either way
+in_cache() {
+  grep -q -F com.apple.mobilesafari "$CACHE" 2>/dev/null || return 2
+  grep -q -F com.legacyray.app "$CACHE" 2>/dev/null
+}
+
+RESPRING=0
+if [ "${SENKO_SKIP_RESPRING:-0}" != "1" ]; then
+  in_cache
+  WAS_IN_CACHE=$?
+  # the status bar hook loads into springboard, so a fresh install restarts it.
+  # so does a reinstall that finds the app missing from the cache: that is the
+  # icon of an earlier install that never came up
+  if [ -z "$2" ] || [ "$WAS_IN_CACHE" = 1 ]; then RESPRING=1; fi
 fi
+
+LOG_TO=/dev/null
+true 2>/dev/null >"$INSTALL_LOG" && LOG_TO=$INSTALL_LOG
+(
+  trap '' HUP
+  echo "postinst $1 ${2:-none} $(date)"
+  rm -f "$UICACHE_DONE"
+  ( uicache 2>&1; echo $? > "$UICACHE_DONE" ) &
+  waited=0
+  while [ ! -s "$UICACHE_DONE" ] && [ "$waited" -lt 90 ]; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if [ -s "$UICACHE_DONE" ]; then
+    echo "uicache exit $(cat "$UICACHE_DONE") after ${waited}s"
+  else
+    echo "uicache still running after ${waited}s, killed"
+    killall -9 uicache 2>&1
+  fi
+  rm -f "$UICACHE_DONE"
+  in_cache
+  case $? in
+    0) echo "the cache lists com.legacyray.app" ;;
+    1) echo "the cache does not list com.legacyray.app" ;;
+    *) echo "the cache cannot be checked" ;;
+  esac
+  if [ "$RESPRING" = 1 ]; then
+    echo "restarting springboard"
+    sleep 1
+    killall -9 SpringBoard 2>&1
+  fi
+) </dev/null >"$LOG_TO" 2>&1 &
 exit 0

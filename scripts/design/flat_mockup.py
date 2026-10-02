@@ -1,4 +1,4 @@
-"""the flat (ios 7+) finish of the main screen and the stations, as the app
+"""the flat (ios 7+) finish of the main screen and the servers, as the app
 draws it (the flat branches of LRConsoleScreen, LRPowerButton, LRServerCard
 and LRStationCells):  python3 scripts/design/flat_mockup.py docs/preview-flat-iphone.png"""
 import math
@@ -104,7 +104,7 @@ def phone(path):
     power(cr, W / 2, cy, R, GREEN)
     sy = cy + side / 2 + 14
     text(cr, 'Подключено', W / 2, sy + 22, 24, INK, align='center', font='Lato Light')
-    text(cr, '01:24:07    ↓ 318 MB    ↑ 12.4 MB', W / 2, sy + 46, 15, MUTED, align='center')
+    text(cr, '01:24:07    ↓ 318 МБ    ↑ 12,4 МБ', W / 2, sy + 46, 15, MUTED, align='center')
     cy2 = H - 64 - 12
     rrect(cr, 10, cy2, W - 20, 64, 12)
     cr.set_source_rgba(*WHITE)
@@ -117,18 +117,21 @@ def phone(path):
     text(cr, 'VLESS · Reality · XHTTP', 66, cy2 + 47, 13, MUTED)
     text(cr, '48 ms', W - 42, cy2 + 37, 15, GOOD, align='right')
     text(cr, '›', W - 22, cy2 + 40, 24, hexc('#C7C7CC'), align='right')
-    # the stations
+    # the servers
     cr.translate(W + 20, 0)
     cr.rectangle(0, 0, W, H)
     cr.set_source_rgba(*BG)
     cr.fill()
     y = 64
-    cr.rectangle(0, y, W, 34)
+    # the subscription's plate: title, then its traffic and the provider's line
+    cr.rectangle(0, y, W, 63)
     cr.set_source_rgba(*BG)
     cr.fill()
-    text(cr, 'NEBULA VPN', 16, y + 22, 13, hexc('#6D6D72'))
-    text(cr, '82% · 12 дн', W - 36, y + 22, 12, hexc('#6D6D72'), align='right')
-    y += 34
+    text(cr, 'NEBULA VPN', 16, y + 21, 13, hexc('#6D6D72'))
+    text(cr, '5 серверов', W - 36, y + 21, 12, hexc('#8E8E93'), align='right')
+    text(cr, '18,4 ГБ из 100 ГБ · осталось 12 дн.', 16, y + 37, 12, hexc('#8E8E93'))
+    text(cr, 'Продление и поддержка — в боте @nebula_vpn_bot', 16, y + 52, 12, hexc('#8E8E93'))
+    y += 63
     rows = [('nl', 'Amsterdam', 'VLESS · Reality', '48 ms', GOOD, True),
             ('de', 'Frankfurt', 'VLESS · XHTTP', '61 ms', GOOD, False),
             ('fi', 'Helsinki', 'VLESS · gRPC', '97 ms', GOOD, False),
@@ -163,7 +166,7 @@ def phone(path):
         cr.fill()
         y += 56
     text(cr, 'ВРУЧНУЮ', 16, y + 22, 13, hexc('#6D6D72'))
-    bar(cr, W, 'Станции', left='‹ Назад', right='•••   +')
+    bar(cr, W, 'Серверы', left='‹ Назад', right='•••   +')
     s.write_to_png(path)
 
 

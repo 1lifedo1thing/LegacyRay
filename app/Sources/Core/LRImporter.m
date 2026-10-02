@@ -41,7 +41,7 @@
 #pragma mark menu
 
 + (void)showMenuFrom:(UIView *)anchor host:(UIViewController *)host {
-    LRMenu *menu = [LRMenu menuWithTitle:L(@"Add stations")];
+    LRMenu *menu = [LRMenu menuWithTitle:L(@"Add servers")];
     [menu addItem:L(@"Paste from Clipboard") action:^{ [LRImporter pasteFromClipboard]; }];
     [menu addItem:L(@"Scan QR Code") action:^{
         LRQRScanScreen *scan = [[[LRQRScanScreen alloc] init] autorelease];
@@ -178,11 +178,11 @@ static BOOL LRIsSubscriptionURL(NSString *s) {
 
 + (void)addServerLink:(NSString *)link {
     [self withDaemon:^{
-        [LRToast show:L(@"Adding station...")];
+        [LRToast show:L(@"Adding server...")];
         [[LRDaemonClient shared] addServerLink:link reply:^(NSString *reply) {
             if (LRReplyIsOK(reply)) {
                 LRLog(@"import", @"station added");
-                [LRToast showSuccess:L(@"Station added")];
+                [LRToast showSuccess:L(@"Server added")];
                 [[LRCatalog shared] reload];
             } else {
                 [LRImporter failed:LRErrorFromReply(reply) ? LRErrorFromReply(reply) : L(@"Invalid configuration link")];
@@ -384,7 +384,7 @@ static int LRTrailingInt(NSString *reply) {
     NSString *ext = [[path pathExtension] lowercaseString];
     if ([ext isEqualToString:@"deb"]) {
         [LRAlert confirmTitle:L(@"Install Update")
-                      message:[NSString stringWithFormat:L(@"Install %@ over the current version? Stations, subscriptions and settings stay in place."),
+                      message:[NSString stringWithFormat:L(@"Install %@ over the current version? Servers, subscriptions and settings stay in place."),
                                [path lastPathComponent]]
                        button:L(@"Install") destructive:NO action:^{
             [LRImporter present:[[[LRUpdateInstallScreen alloc] initWithPackagePath:path] autorelease]];
@@ -404,7 +404,7 @@ static int LRTrailingInt(NSString *reply) {
     LRLog(@"import", @"file import (.%@)", ext);
     if ([ext isEqualToString:@"lray"] || [ext isEqualToString:@"senko"]) {
         [LRAlert confirmTitle:L(@"Restore Backup")
-                      message:L(@"Replace all stations, subscriptions, rules and daemon settings with the ones in this backup?")
+                      message:L(@"Replace all servers, subscriptions, rules and daemon settings with the ones in this backup?")
                        button:L(@"Restore") destructive:YES action:^{
             [LRImporter withDaemon:^{
                 [[LRDaemonClient shared] restoreBackupData:data reply:^(NSString *reply) {

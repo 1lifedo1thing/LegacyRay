@@ -712,6 +712,14 @@ static int apply_pf_mode(const char *pfctl, const char *server_ips,
 static int socks5_connect_to_dns(int socks_port, const char *dns_upstream) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return -1;
+/* the greeting is answered by the loop, which is busy while a connect is
+   being set up; without a bound this thread would stop answering dns for
+   the whole device until the loop came back */
+    struct timeval timeout;
+    timeout.tv_sec = 5;
+    timeout.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout);
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof addr);
@@ -771,11 +779,6 @@ static int dns_exchange(routing_exec_t *st, int *tcp_fd,
     if (*tcp_fd < 0) {
         *tcp_fd = socks5_connect_to_dns(st->socks_port, st->dns_upstream);
         if (*tcp_fd < 0) return -1;
-        struct timeval timeout;
-        timeout.tv_sec = 5;
-        timeout.tv_usec = 0;
-        setsockopt(*tcp_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
-        setsockopt(*tcp_fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout);
     }
     length[0] = (uint8_t)(query_len >> 8);
     length[1] = (uint8_t)query_len;

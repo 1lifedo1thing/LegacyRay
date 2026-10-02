@@ -23,8 +23,13 @@
 @interface LRPlateHeaderCell : UITableViewCell {
     UIView *_plate;
 }
+/* usage and note are the caption lines under a subscription's name: its
+   traffic and time, then the provider's own description */
 - (void)showTitle:(NSString *)title country:(NSString *)code meta:(NSString *)meta
+            usage:(NSString *)usage note:(NSString *)note
         collapsed:(BOOL)collapsed margin:(CGFloat)margin;
++ (CGFloat)heightWithCountry:(NSString *)code usage:(NSString *)usage note:(NSString *)note
+                       width:(CGFloat)width margin:(CGFloat)margin;
 @end
 
 #define LR_STATION_ROW_HEIGHT 56.0f

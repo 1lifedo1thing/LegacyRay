@@ -24,7 +24,7 @@
 - (id)init {
     if ((self = [super init])) {
         _backgroundStyle = LRBackgroundGrouped;
-        self.title = L(@"Stations");
+        self.title = L(@"Servers");
     }
     return self;
 }
@@ -166,7 +166,7 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
     text.shadowColor = s->flat ? nil : s->groupHeaderShadow;
     text.shadowOffset = CGSizeMake(0, 1);
     BOOL offline = catalog.loaded == NO;
-    title.text = offline ? L(@"The daemon is silent") : L(@"No stations yet");
+    title.text = offline ? L(@"The daemon is silent") : L(@"No servers yet");
     text.text = offline ? L(@"LegacyRay could not reach its background service. Start it again, or reinstall the package if this keeps happening.")
                         : L(@"Add your first connection: paste a link, scan a QR code or add a subscription from your provider.");
     [_empty addSubview:title];
@@ -222,26 +222,52 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)ip {
-    NSString *kind = [[self rowAt:ip] objectForKey:@"kind"];
-    if ([kind isEqualToString:@"plate"]) return SKIN->flat ? 34 : LR_PLATE_ROW_HEIGHT;
+    NSDictionary *row = [self rowAt:ip];
+    NSString *kind = [row objectForKey:@"kind"];
+    if ([kind isEqualToString:@"plate"]) {
+        LRSection *sec = [row objectForKey:@"section"];
+        return [LRPlateHeaderCell heightWithCountry:sec.countryCode usage:[self usageForSection:sec]
+                                               note:[self noteForSection:sec]
+                                              width:tableView.bounds.size.width margin:[self margin]];
+    }
     return LR_STATION_ROW_HEIGHT;
 }
 
 - (NSString *)metaForSection:(LRSection *)sec {
-    if ([sec isManual]) {
-        NSUInteger n = [sec.servers count];
-        return [NSString stringWithFormat:@"%lu %@", (unsigned long)n, LRPlural((NSInteger)n, L(@"station"),
-                L(@"stations (few)"), L(@"stations"))];
-    }
+    NSUInteger n = [sec.servers count];
+    return [NSString stringWithFormat:@"%lu %@", (unsigned long)n, LRPlural((NSInteger)n, L(@"server"),
+            L(@"servers (few)"), L(@"servers"))];
+}
+
+/* the first caption line under a subscription: the traffic as the provider
+   counts it, and the time left */
+- (NSString *)usageForSection:(LRSection *)sec {
     LRSubscription *sub = sec.subscription;
+    if (!sub || [sec isManual]) return nil;
     NSMutableArray *parts = [NSMutableArray array];
-    double f = [sub usageFraction];
-    if (f >= 0) [parts addObject:[NSString stringWithFormat:@"%.0f%%", f * 100]];
+    unsigned long long used = [sub used];
+    if (sub.total)
+        [parts addObject:[NSString stringWithFormat:L(@"%@ of %@"), LRBytes(used), LRBytes(sub.total)]];
+    else if (used)
+        [parts addObject:[NSString stringWithFormat:L(@"%@ used"), LRBytes(used)]];
     NSInteger days = [sub daysLeft];
     if (days != NSIntegerMax)
-        [parts addObject:days < 0 ? L(@"expired") : [NSString stringWithFormat:L(@"%ld d"), (long)days]];
-    if (![parts count]) [parts addObject:[NSString stringWithFormat:@"%lu", (unsigned long)[sec.servers count]]];
-    return [parts componentsJoinedByString:@" · "];
+        [parts addObject:days < 0 ? L(@"expired") : [NSString stringWithFormat:L(@"%ld d left"), (long)days]];
+    return [parts count] ? [parts componentsJoinedByString:@" · "] : nil;
+}
+
+/* the second: what the provider wrote about the subscription (its
+   description, or the announce line), on one paragraph */
+- (NSString *)noteForSection:(LRSection *)sec {
+    if ([sec isManual] || ![sec.subscription.summary length]) return nil;
+    NSArray *lines = [sec.subscription.summary componentsSeparatedByCharactersInSet:
+                      [NSCharacterSet newlineCharacterSet]];
+    NSMutableArray *kept = [NSMutableArray array];
+    for (NSString *line in lines) {
+        NSString *t = LRTrim(line);
+        if ([t length]) [kept addObject:t];
+    }
+    return [kept count] ? [kept componentsJoinedByString:@" "] : nil;
 }
 
 - (void)configure:(UITableViewCell *)cell at:(NSIndexPath *)ip {
@@ -262,11 +288,12 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
             NSUInteger n = [[LRAWGProfiles profiles] count];
             NSString *meta = [NSString stringWithFormat:@"%lu %@", (unsigned long)n,
                               LRPlural((NSInteger)n, L(@"profile"), L(@"profiles (few)"), L(@"profiles"))];
-            [(LRPlateHeaderCell *)cell showTitle:@"AmneziaWG" country:nil meta:meta
+            [(LRPlateHeaderCell *)cell showTitle:@"AmneziaWG" country:nil meta:meta usage:nil note:nil
                                        collapsed:[LRPrefs sectionCollapsed:@"awg"] margin:margin];
             return;
         }
         [(LRPlateHeaderCell *)cell showTitle:sec.title country:sec.countryCode meta:[self metaForSection:sec]
+                                       usage:[self usageForSection:sec] note:[self noteForSection:sec]
                                    collapsed:[sec collapsed] && !_arranging margin:margin];
         return;
     }
@@ -418,7 +445,7 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
             [me setArranging:NO];
         }];
         self.header.extraButton = nil;
-        [LRToast show:L(@"Drag subscriptions and manual stations to change their order")];
+        [LRToast show:L(@"Drag subscriptions and manual servers to change their order")];
     } else {
         UIColor *ink = [LRHeaderBar glyphColor];
         [self.header setRightGlyph:LRGlyphPlus(16, ink) action:^(LRButton *b) {
@@ -463,10 +490,10 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
 #pragma mark fastest
 
 - (void)connectFastestOf:(NSArray *)servers {
-    [LRToast show:[NSString stringWithFormat:L(@"Measuring %lu stations..."), (unsigned long)[servers count]]];
+    [LRToast show:[NSString stringWithFormat:L(@"Measuring %lu servers..."), (unsigned long)[servers count]]];
     [[LRCatalog shared] pickFastestOf:servers done:^(LRServer *best, int ms) {
         if (!best) {
-            [LRToast showError:L(@"No station answered")];
+            [LRToast showError:L(@"No server answered")];
             return;
         }
         LRLog(@"stations", @"fastest station picked (%d ms)", ms);
@@ -545,7 +572,7 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
     __block LRStationsScreen *me = self;
     NSString *name = [[LRCatalog shared] displayNameForServer:sv];
     LRMenu *menu = [LRMenu menuWithTitle:name];
-    [menu addItem:[[LRTunnel shared] isOn] ? L(@"Switch to this station") : L(@"Connect")
+    [menu addItem:[[LRTunnel shared] isOn] ? L(@"Switch to this server") : L(@"Connect")
            action:^{
         [LRPrefs setSelectedBackend:LRBackendServer];
         [[LRTunnel shared] connectServerIndex:sv.index];
@@ -569,7 +596,7 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
     }];
     if (sv.group < 0)
         [menu addDestructiveItem:L(@"Delete") action:^{
-            [LRAlert confirmTitle:L(@"Delete Station") message:name button:L(@"Delete") destructive:YES action:^{
+            [LRAlert confirmTitle:L(@"Delete Server") message:name button:L(@"Delete") destructive:YES action:^{
                 [[LRDaemonClient shared] deleteServerIndex:sv.index reply:^(NSString *reply) {
                     if (LRReplyIsOK(reply)) {
                         LRLog(@"stations", @"station deleted");
@@ -617,9 +644,9 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
             }];
         }];
     } else if ([sec isManual] && [sec.servers count]) {
-        [menu addDestructiveItem:L(@"Delete all manual stations") action:^{
-            [LRAlert confirmTitle:L(@"Delete all manual stations")
-                          message:L(@"Only manually added stations are removed. Subscriptions stay.")
+        [menu addDestructiveItem:L(@"Delete all manual servers") action:^{
+            [LRAlert confirmTitle:L(@"Delete all manual servers")
+                          message:L(@"Only manually added servers are removed. Subscriptions stay.")
                            button:L(@"Delete") destructive:YES action:^{
                 [[LRDaemonClient shared] clearManualServers:^(NSString *reply) {
                     [[LRCatalog shared] reload];

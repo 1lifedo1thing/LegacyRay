@@ -98,3 +98,8 @@ clean:
 	$(MAKE) -C tweaks/status clean
 	$(MAKE) -C app clean
 	rm -rf $(STAGE)
+
+CYDIA_REPO = $(HOME)/Theos-Projects/cydia-repo
+
+publish:: package
+	@python3 $(CYDIA_REPO)/tools/repo.py publish $(CURDIR) $(if $(MSG),-m "$(MSG)")

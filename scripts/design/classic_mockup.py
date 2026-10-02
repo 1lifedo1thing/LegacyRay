@@ -46,7 +46,7 @@ def main_screen(cr, x, y, w, h, state='on', pad=False):
     label = {'on': 'Подключено', 'off': 'Не подключено', 'tuning': 'Подключение…',
              'error': 'Не удалось подключиться'}[state]
     text(cr, label, x + w / 2, top + sy + 21, 20, WHITE, bold=True, align='center', shadow=(0, 0, 0, 0.8), dy=1)
-    sub = {'on': '01:24:07    ↓ 318 MB    ↑ 12.4 MB', 'off': 'Нажмите кнопку, чтобы подключиться.',
+    sub = {'on': '01:24:07    ↓ 318 МБ    ↑ 12,4 МБ', 'off': 'Нажмите кнопку, чтобы подключиться.',
            'tuning': 'Amsterdam', 'error': 'Сервер не ответил.'}[state]
     text(cr, sub, x + w / 2, top + sy + 44, 14, hexc('#A4A8AE'), align='center', shadow=(0, 0, 0, 0.8), dy=1)
     server_card(cr, x + (w - cw) / 2, top + cardy, cw, 59, 'nl', 'Amsterdam', 'VLESS · Reality · XHTTP',
@@ -119,19 +119,22 @@ def grouped(cr, x, y, w, sections, margin=10):
 def station_list(cr, x, y, w, margin=10):
     """LRStationsScreen with LRStationCell rows and LRPlateHeaderCell captions"""
     groups = [
-        ('Nebula VPN', '82% · 12 дн', [
+        ('Nebula VPN', '5 серверов', '18,4 ГБ из 100 ГБ · осталось 12 дн.',
+         'Продление и поддержка — в боте @nebula_vpn_bot', [
             ('nl', 'Amsterdam', 'VLESS · Reality', '48 ms', GOOD, True),
             ('de', 'Frankfurt', 'VLESS · XHTTP', '61 ms', GOOD, False),
             ('fi', 'Helsinki', 'VLESS · gRPC', '97 ms', GOOD, False),
             ('us', 'New York', 'Trojan · TLS', '144 ms', GOOD, False),
             ('jp', 'Tokyo', 'VLESS · WS', 'нет сигнала', BAD, False)]),
-        ('Вручную', '2 станции', [
+        ('Вручную', '2 сервера', None, None, [
             ('se', 'Stockholm', 'Shadowsocks · 2022', None, None, False),
             (None, 'Домашний роутер', 'AmneziaWG', None, None, False)]),
     ]
-    for title, meta, rows in groups:
-        mid = y + 44 - 16
-        text(cr, title, x + margin + 9, mid + 6, 17, HEADER, bold=True, shadow=WHITE, dy=1)
+    for title, meta, usage, note, rows in groups:
+        # a captioned plate starts its title at the top, like LRPlateHeaderView
+        mid = y + 28
+        left = x + margin + 9
+        text(cr, title, left, mid + 6, 17, HEADER, bold=True, shadow=WHITE, dy=1)
         right = x + w - margin - 9
         cr.save()
         cr.set_source_rgba(*HEADER)
@@ -143,6 +146,14 @@ def station_list(cr, x, y, w, margin=10):
         cr.restore()
         text(cr, meta, right - 16, mid + 5, 14, HEADER, align='right', shadow=WHITE, dy=1)
         y += 44
+        if usage:
+            text(cr, usage, left, y + 8, 14, HEADER, shadow=WHITE, dy=1)
+            y += 18
+        if note:
+            lines = wrap(cr, note, 13, right - 16 - left)[:2]
+            for k, line in enumerate(lines):
+                text(cr, line, left, y + 7 + k * 16, 13, HEADER, shadow=WHITE, dy=1)
+            y += len(lines) * 16 + 2
         for i, (code, name, detail, ping, col, sel) in enumerate(rows):
             n = len(rows)
             pos = 'single' if n == 1 else ('top' if i == 0 else ('bottom' if i == n - 1 else 'middle'))
@@ -200,7 +211,7 @@ def iphone(path):
     def stations(cr):
         pinstripes(cr, 0, 64, W, H - 64)
         station_list(cr, 0, 64, W)
-        nav_bar(cr, 0, 20, W, 'Станции', left=('text', 'Назад', 'back'), right=('glyph', 'plus'),
+        nav_bar(cr, 0, 20, W, 'Серверы', left=('text', 'Назад', 'back'), right=('glyph', 'plus'),
                 extra=('glyph', 'dots'))
     screens.append(stations)
 
@@ -253,7 +264,7 @@ def ipad(path, W=1024, H=768):
     lw = 320
     pinstripes(cr, 0, 64, lw, H - 64)
     station_list(cr, 0, 64, lw)
-    nav_bar(cr, 0, 20, lw, 'Станции', left=('glyph', 'dots'), right=('glyph', 'plus'))
+    nav_bar(cr, 0, 20, lw, 'Серверы', left=('glyph', 'dots'), right=('glyph', 'plus'))
     cr.set_source_rgb(0, 0, 0)
     cr.rectangle(lw, 20, 1, H - 20)
     cr.fill()

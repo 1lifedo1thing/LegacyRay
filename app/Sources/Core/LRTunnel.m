@@ -27,6 +27,37 @@ static void LRClearStatusBadge(void) {
     }
 }
 
+/* the daemon answers "layer: reason" in english for the log. the user gets
+   what went wrong in words, with the daemon's own reason kept in brackets so
+   a screenshot still says exactly which step failed */
+static NSString *LRConnectErrorText(NSString *err) {
+    NSString *lower = [err lowercaseString];
+    NSString *what = L(@"Could not connect");
+    if ([lower rangeOfString:@"dns resolution failed"].location != NSNotFound ||
+        [lower rangeOfString:@"cannot be resolved"].location != NSNotFound)
+        what = L(@"The server address could not be found (DNS)");
+    else if ([lower rangeOfString:@"unsupported"].location != NSNotFound)
+        what = L(@"This kind of server is not supported");
+    else if ([lower rangeOfString:@"uuid"].location != NSNotFound)
+        what = L(@"The server link has a wrong key (UUID)");
+    else if ([lower hasPrefix:@"routing"])
+        what = L(@"Traffic could not be sent into the tunnel");
+    else if ([lower rangeOfString:@"tunnel open failed"].location != NSNotFound)
+        what = L(@"The server refused the connection");
+    /* the loop drops the local handshake when it cannot reach the server */
+    else if ([lower rangeOfString:@"greet"].location != NSNotFound)
+        what = L(@"The server does not answer");
+    else if ([lower rangeOfString:@"socks listener"].location != NSNotFound ||
+             [lower rangeOfString:@"socks not ready"].location != NSNotFound)
+        what = L(@"The local proxy port could not be opened");
+    else if ([lower rangeOfString:@"response"].location != NSNotFound ||
+             [lower rangeOfString:@"dial"].location != NSNotFound ||
+             [lower rangeOfString:@"verify"].location != NSNotFound ||
+             [lower rangeOfString:@"write failed"].location != NSNotFound)
+        what = L(@"The server does not pass traffic");
+    return [NSString stringWithFormat:@"%@ (%@)", what, err];
+}
+
 @implementation LRTunnel
 @synthesize state = _state, activeBackend = _activeBackend, uptime = _uptime,
             bytesUp = _bytesUp, bytesDown = _bytesDown, speedUp = _speedUp,
@@ -374,7 +405,7 @@ static BOOL LRInterfaceBytes(NSString *name, uint64_t *inBytes, uint64_t *outByt
     if (idx < 0) {
         LRServer *first = [[LRCatalog shared] serverAfterSelected:0];
         if (!first) {
-            [self failWith:L(@"No station selected. Import a server or a subscription first.")];
+            [self failWith:L(@"No server selected. Import a server or a subscription first.")];
             return;
         }
         idx = first.index;
@@ -408,9 +439,13 @@ static BOOL LRInterfaceBytes(NSString *name, uint64_t *inBytes, uint64_t *outByt
                 NSString *finalState = LRStateFromReply(reply, NULL);
                 BOOL stuck = [finalState isEqualToString:@"connecting"] && !err;
                 if (!reply || stuck) {
+                    NSString *why = !reply ? L(@"The LegacyRay service did not answer")
+                        : [reply rangeOfString:@LR_REPLY_CLOSED].location != NSNotFound
+                            ? L(@"The LegacyRay service restarted while connecting")
+                            : L(@"Connection timed out");
                     /* a missing answer can leave routing half applied */
                     [client disconnect:^(NSString *r) {
-                        [self failWith:L(@"Connection timed out")];
+                        [self failWith:why];
                     }];
                     return;
                 }
@@ -419,7 +454,7 @@ static BOOL LRInterfaceBytes(NSString *name, uint64_t *inBytes, uint64_t *outByt
                     _uptimeBase = [NSDate timeIntervalSinceReferenceDate];
                     [self setState:LRTunnelConnected];
                 } else {
-                    [self failWith:err ? err : L(@"The server did not accept the connection")];
+                    [self failWith:err ? LRConnectErrorText(err) : L(@"The server did not accept the connection")];
                 }
                 [[LRCatalog shared] reload];
             }];

@@ -334,7 +334,7 @@ NSString *LRHTTPGetText(NSString *host, NSString *path, int socksPort, int timeo
 - (void)runHandshake {
     LRServer *sv = [[LRCatalog shared] selectedServer];
     if (!sv || [LRTunnel shared].activeBackend == LRBackendAmneziaWG) {
-        [self finishStep:3 result:LRCheckSkipped detail:L(@"No station selected") ms:0];
+        [self finishStep:3 result:LRCheckSkipped detail:L(@"No server selected") ms:0];
         [self runTunnelHTTP];
         return;
     }

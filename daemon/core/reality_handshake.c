@@ -39,6 +39,9 @@ int reality_set_client_version(const char *text) {
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#if defined(__APPLE__)
+#include <mach/mach_time.h>
+#endif
 
 #include <openssl/x509.h>
 #include <openssl/evp.h>
@@ -156,77 +159,90 @@ typedef struct {
     uint64_t c_app_bytes; /* sealed app bytes; gates bulk record size */
 } rh_conn_t;
 
-/* keep bootstrap blocking because free nodes often stall mid-flight */
+/* each phase of the handshake gets this much wall time. the old budget only
+   counted poll slices while the socket blocked in read() on a 4 s
+   SO_RCVTIMEO between them, so a ClientHello the network swallowed held its
+   connection for ~21 s per attempt instead of failing over to a redial */
+#define RH_HS_IO_BUDGET_MS 4000
 
-#define RH_HS_IO_POLL_MS  2000
-#define RH_HS_IO_BUDGET_MS 5000
+static uint64_t rh_now_ms(void) {
+#if defined(__APPLE__)
+    static mach_timebase_info_data_t timebase;
+    if (timebase.denom == 0) mach_timebase_info(&timebase);
+    return mach_absolute_time() * timebase.numer / timebase.denom / 1000000ull;
+#else
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (uint64_t)ts.tv_sec * 1000ull + (uint64_t)ts.tv_nsec / 1000000ull;
+#endif
+}
 
-static int read_full(int fd, uint8_t *buf, size_t n, int *want_read) {
+/* wait for the socket until the phase deadline; 0 ready, -1 out of time */
+static int wait_fd(int fd, short events, uint64_t deadline) {
+    for (;;) {
+        uint64_t now = rh_now_ms();
+        if (now >= deadline) { errno = EAGAIN; return -1; }
+        struct pollfd pfd;
+        pfd.fd = fd;
+        pfd.events = events;
+        pfd.revents = 0;
+        int pr = poll(&pfd, 1, (int)(deadline - now));
+        if (pr > 0) return 0;
+        if (pr < 0 && errno != EINTR) return -1;
+    }
+}
+
+static int read_full(int fd, uint8_t *buf, size_t n, uint64_t deadline) {
     size_t off = 0;
-    int waited = 0;
     while (off < n) {
         ssize_t r = read(fd, buf + off, n - off);
         if (r > 0) { off += (size_t)r; continue; }
-        if (r < 0 && errno == EINTR) continue;
-        if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            if (waited >= RH_HS_IO_BUDGET_MS) {
-                if (want_read && off == 0) *want_read = 1;
-                return -1;
-            }
-            struct pollfd pfd;
-            pfd.fd = fd;
-            pfd.events = POLLIN;
-            int slice = RH_HS_IO_POLL_MS;
-            if (slice > RH_HS_IO_BUDGET_MS - waited)
-                slice = RH_HS_IO_BUDGET_MS - waited;
-            int pr = poll(&pfd, 1, slice);
-            if (pr > 0) { waited += slice; continue; }
-            if (pr == 0) { waited += slice; continue; }
-        }
+        if (r == 0) { errno = 0; return -1; }
+        if (errno == EINTR) continue;
+        if ((errno == EAGAIN || errno == EWOULDBLOCK) &&
+            wait_fd(fd, POLLIN, deadline) == 0)
+            continue;
         return -1;
     }
     return 0;
 }
 
-static int write_full(int fd, const uint8_t *buf, size_t n) {
+static int write_full(int fd, const uint8_t *buf, size_t n, uint64_t deadline) {
     size_t off = 0;
-    int waited = 0;
     while (off < n) {
         ssize_t w = write(fd, buf + off, n - off);
         if (w > 0) { off += (size_t)w; continue; }
         if (w < 0 && errno == EINTR) continue;
-        if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            if (waited >= RH_HS_IO_BUDGET_MS) return -1;
-            struct pollfd pfd;
-            pfd.fd = fd;
-            pfd.events = POLLOUT;
-            int slice = RH_HS_IO_POLL_MS;
-            if (slice > RH_HS_IO_BUDGET_MS - waited)
-                slice = RH_HS_IO_BUDGET_MS - waited;
-            int pr = poll(&pfd, 1, slice);
-            if (pr > 0) { waited += slice; continue; }
-            if (pr == 0) { waited += slice; continue; }
-        }
+        if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) &&
+            wait_fd(fd, POLLOUT, deadline) == 0)
+            continue;
         return -1;
     }
     return 0;
 }
 
-static int read_record(int fd, uint8_t *type, uint8_t *body, size_t cap, size_t *body_len, int *want_read) {
+static int read_record(int fd, uint8_t *type, uint8_t *body, size_t cap, size_t *body_len,
+                       uint64_t deadline) {
     uint8_t hdr[5];
-    if (read_full(fd, hdr, 5, want_read) != 0) return -1;
+    if (read_full(fd, hdr, 5, deadline) != 0) return -1;
     size_t len = ((size_t)hdr[3] << 8) | hdr[4];
     if (len > cap) return -1;
-    if (read_full(fd, body, len, want_read) != 0) return -1;
+    if (read_full(fd, body, len, deadline) != 0) return -1;
     *type = hdr[0];
     *body_len = len;
     return 0;
 }
 
-static int write_plaintext_record(int fd, uint8_t type, const uint8_t *data, size_t len) {
-    uint8_t hdr[5] = { type, 0x03, 0x03, (uint8_t)(len >> 8), (uint8_t)(len & 0xff) };
-    if (write_full(fd, hdr, 5) != 0) return -1;
-    return write_full(fd, data, len);
+/* one segment, like a browser: with TCP_NODELAY a separate header write
+   went out as a 5 byte packet of its own */
+static int write_plaintext_record(int fd, uint8_t type, const uint8_t *data, size_t len,
+                                  uint64_t deadline) {
+    uint8_t rec[5 + 2048];
+    if (len > sizeof rec - 5) return -1;
+    rec[0] = type; rec[1] = 0x03; rec[2] = 0x03;
+    rec[3] = (uint8_t)(len >> 8); rec[4] = (uint8_t)(len & 0xff);
+    memcpy(rec + 5, data, len);
+    return write_full(fd, rec, len + 5, deadline);
 }
 
 /* collect encrypted handshake fragments while ignoring plaintext ccs records */
@@ -238,6 +254,7 @@ typedef struct {
     tls13_aead_t aead;
     uint64_t seq;
     int      fd;
+    uint64_t deadline;
 } flight_t;
 
 /* collect one server flight while preserving io and auth failure classes */
@@ -245,7 +262,7 @@ static int flight_fill(flight_t *f) {
     for (;;) {
         uint8_t rec[MAX_RECORD], type;
         size_t rlen;
-        if (read_record(f->fd, &type, rec, sizeof rec, &rlen, NULL) != 0) return -1;
+        if (read_record(f->fd, &type, rec, sizeof rec, &rlen, f->deadline) != 0) return -1;
         if (type == CT_CCS) continue; /* middlebox-compat, ignore */
         if (type == CT_ALERT) {
             log_tls_alert("plaintext alert during server flight", rec, rlen);
@@ -381,6 +398,7 @@ void *reality_handshake_open(int fd, const rh_params_t *p, rh_status_t *err) {
     tls13_transcript_update(&tr, hello, hello_len);
 
     stage = "ClientHello send";
+    uint64_t deadline = rh_now_ms() + RH_HS_IO_BUDGET_MS;
     if (frag_enabled() && hello_len + 5 <= 4096) {
 /* one buffer, so the fragments cut through the record header and the hello
    alike instead of the header always going out alone */
@@ -390,13 +408,13 @@ void *reality_handshake_open(int fd, const rh_params_t *p, rh_status_t *err) {
         memcpy(rec + 5, hello, hello_len);
         if (frag_write_all(fd, rec, hello_len + 5, RH_HS_IO_BUDGET_MS) != 0)
             FAIL(RH_ERR_IO);
-    } else if (write_plaintext_record(fd, CT_HANDSHAKE, hello, hello_len) != 0)
+    } else if (write_plaintext_record(fd, CT_HANDSHAKE, hello, hello_len, deadline) != 0)
         FAIL(RH_ERR_IO);
 
     stage = "ServerHello read";
     uint8_t shrec[MAX_RECORD], shtype; size_t shlen;
     do {
-        if (read_record(fd, &shtype, shrec, sizeof shrec, &shlen, NULL) != 0) FAIL(RH_ERR_IO);
+        if (read_record(fd, &shtype, shrec, sizeof shrec, &shlen, deadline) != 0) FAIL(RH_ERR_IO);
     } while (shtype == CT_CCS);
     if (shtype == CT_ALERT) log_tls_alert("ServerHello read", shrec, shlen);
     if (shtype != CT_HANDSHAKE) FAIL(RH_ERR_PROTO);
@@ -439,6 +457,7 @@ void *reality_handshake_open(int fd, const rh_params_t *p, rh_status_t *err) {
     flight_t fl;
     memset(&fl, 0, sizeof fl);
     fl.s_key = s_hs_key; fl.s_iv = s_hs_iv; fl.aead = aead; fl.seq = 0; fl.fd = fd;
+    fl.deadline = rh_now_ms() + RH_HS_IO_BUDGET_MS;
     size_t fconsumed = 0;
 
     int saw_ee = 0, saw_cert = 0, saw_cv = 0;
@@ -511,7 +530,8 @@ void *reality_handshake_open(int fd, const rh_params_t *p, rh_status_t *err) {
                           cfin_rec, sizeof cfin_rec, &cfin_rec_len) != TLS13_REC_OK)
         FAIL(RH_ERR_CRYPTO);
     stage = "client Finished send";
-    if (write_full(fd, cfin_rec, cfin_rec_len) != 0) FAIL(RH_ERR_IO);
+    if (write_full(fd, cfin_rec, cfin_rec_len, rh_now_ms() + RH_HS_IO_BUDGET_MS) != 0)
+        FAIL(RH_ERR_IO);
 
     c = (rh_conn_t *)calloc(1, sizeof *c);
     if (!c) FAIL(RH_ERR_CRYPTO);
@@ -939,14 +959,9 @@ static void *rh_open(int fd, const transport_tls_cfg_t *cfg) {
 
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0) return NULL;
-    if (fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) < 0) return NULL;
-
-/* short handshake budget: free nodes fail fast (proto) */
-    struct timeval tv;
-    tv.tv_sec = 4;
-    tv.tv_usec = 0;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+/* nonblocking, so the handshake io waits in poll against a real deadline:
+   free nodes fail fast and a swallowed hello is redialed within seconds */
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) return NULL;
 
     struct pollfd pfd;
     pfd.fd = fd;

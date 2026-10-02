@@ -106,23 +106,30 @@ NSString *LRTrim(NSString *s) {
 }
 
 NSString *LRBytes(unsigned long long bytes) {
-    if (bytes < 1024ULL) return [NSString stringWithFormat:@"%llu B", bytes];
+    if (bytes < 1024ULL) return [NSString stringWithFormat:@"%llu %@", bytes, L(@"B")];
     double v = (double)bytes / 1024.0;
-    NSArray *units = [NSArray arrayWithObjects:@"KB", @"MB", @"GB", @"TB", nil];
+    NSArray *units = [NSArray arrayWithObjects:L(@"KB"), L(@"MB"), L(@"GB"), L(@"TB"), nil];
     NSUInteger u = 0;
     while (v >= 1024.0 && u + 1 < [units count]) {
         v /= 1024.0;
         ++u;
     }
     NSString *fmt = v >= 100.0 ? @"%.0f %@" : (v >= 10.0 ? @"%.1f %@" : @"%.2f %@");
-    return [NSString stringWithFormat:fmt, v, [units objectAtIndex:u]];
+    NSString *text = [NSString stringWithFormat:fmt, v, [units objectAtIndex:u]];
+    /* "12,4 ГБ": a russian reader expects the decimal comma */
+    if (LRCurrentLanguage() == LRLanguageRussian)
+        text = [text stringByReplacingOccurrencesOfString:@"." withString:@","];
+    return text;
 }
 
 NSString *LRSpeed(double bps) {
     if (bps < 0) bps = 0;
-    if (bps < 1024.0) return [NSString stringWithFormat:@"%.0f B/s", bps];
-    if (bps < 1024.0 * 1024.0) return [NSString stringWithFormat:@"%.0f KB/s", bps / 1024.0];
-    return [NSString stringWithFormat:@"%.1f MB/s", bps / (1024.0 * 1024.0)];
+    if (bps < 1024.0) return [NSString stringWithFormat:@"%.0f %@", bps, L(@"B/s")];
+    if (bps < 1024.0 * 1024.0) return [NSString stringWithFormat:@"%.0f %@", bps / 1024.0, L(@"KB/s")];
+    NSString *text = [NSString stringWithFormat:@"%.1f %@", bps / (1024.0 * 1024.0), L(@"MB/s")];
+    if (LRCurrentLanguage() == LRLanguageRussian)
+        text = [text stringByReplacingOccurrencesOfString:@"." withString:@","];
+    return text;
 }
 
 NSString *LRDuration(long seconds) {

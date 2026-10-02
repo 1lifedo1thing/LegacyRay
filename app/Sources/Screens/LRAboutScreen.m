@@ -4,35 +4,55 @@
 #import "LRVersion.h"
 #import "LRDraw.h"
 
-/* the badge at the top of About: the app icon on the plate */
+/* the badge at the top of About: the app icon as the home screen shows it */
 @interface LRAboutBadge : UIView
 @end
+
+/* the shine ios 6 lays over a home screen icon, so the badge here reads like
+   the icon that was tapped. the radius stays outside the badge's own corners */
+static void LRDrawIconShine(CGContextRef ctx, CGRect r, CGFloat radius) {
+    CGContextSaveGState(ctx);
+    LRAddRoundRect(ctx, r, radius);
+    CGContextClip(ctx);
+    CGContextAddEllipseInRect(ctx, CGRectMake(r.origin.x - r.size.width * 0.45f,
+                                              r.origin.y - r.size.height * 0.62f,
+                                              r.size.width * 1.9f, r.size.height * 1.14f));
+    CGContextClip(ctx);
+    CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+    CGFloat comps[] = { 1, 1, 1, 0.45f, 1, 1, 1, 0.08f };
+    CGFloat locs[] = { 0, 1 };
+    CGGradientRef g = CGGradientCreateWithColorComponents(space, comps, locs, 2);
+    CGContextDrawLinearGradient(ctx, g, CGPointMake(0, CGRectGetMinY(r)),
+                                CGPointMake(0, CGRectGetMinY(r) + r.size.height * 0.52f), 0);
+    CGGradientRelease(g);
+    CGColorSpaceRelease(space);
+    CGContextRestoreGState(ctx);
+}
 
 @implementation LRAboutBadge
 - (void)drawRect:(CGRect)rect {
     LRSkin *s = SKIN;
     CGRect b = self.bounds;
-    UIImage *icon = [UIImage imageNamed:LRIsPad() ? @"Icon-72.png" : @"Icon.png"];
+    /* 72 pt on every device: the 72 and 144 px files, never a 57 px one
+       stretched */
+    UIImage *icon = [UIImage imageNamed:@"Icon-72.png"];
     CGFloat side = 72;
     CGRect ir = CGRectMake(roundf((b.size.width - side) / 2), 16, side, side);
     CGContextRef ctx = UIGraphicsGetCurrentContext();
+    /* the icon carries its own rounded corners; the shadow follows them */
     CGContextSaveGState(ctx);
     CGContextSetShadowWithColor(ctx, CGSizeMake(0, 2), 4, [UIColor colorWithWhite:0 alpha:0.4f].CGColor);
-    LRAddRoundRect(ctx, ir, 14);
-    [[UIColor blackColor] setFill];
-    CGContextFillPath(ctx);
-    CGContextRestoreGState(ctx);
-    CGContextSaveGState(ctx);
-    LRAddRoundRect(ctx, ir, 14);
-    CGContextClip(ctx);
     [icon drawInRect:ir];
     CGContextRestoreGState(ctx);
+    if (!s->flat) LRDrawIconShine(ctx, ir, 14);
     UIFont *title = s->flat ? [LRSkin lightFont:24] : [LRSkin titleFont:22];
     LRDrawEngraved(@"LegacyRay", CGRectMake(0, 96, b.size.width, 28), title, NSTextAlignmentCenter,
                    s->groupInk, s->flat ? nil : s->groupHeaderShadow, 1);
     NSString *v = [NSString stringWithFormat:L(@"Version %@ (%@)"), @LR_VERSION, @LR_BUILD_NUMBER];
     LRDrawEngraved(v, CGRectMake(0, 126, b.size.width, 18), [LRSkin bodyFont:13], NSTextAlignmentCenter,
                    s->groupMuted, nil, 0);
+    LRDrawEngraved(@LR_DEVELOPER, CGRectMake(0, 145, b.size.width, 18), [LRSkin bodyFont:13],
+                   NSTextAlignmentCenter, s->groupMuted, nil, 0);
 }
 @end
 
@@ -44,7 +64,7 @@
 }
 
 - (void)viewDidLoad {
-    LRAboutBadge *badge = [[[LRAboutBadge alloc] initWithFrame:CGRectMake(0, 0, 320, 150)] autorelease];
+    LRAboutBadge *badge = [[[LRAboutBadge alloc] initWithFrame:CGRectMake(0, 0, 320, 170)] autorelease];
     badge.backgroundColor = [UIColor clearColor];
     badge.contentMode = UIViewContentModeRedraw;
     [self setTableHeaderView:badge];
@@ -78,7 +98,7 @@
     return [NSArray arrayWithObjects:
             [LRSectionSpec header:nil rows:info footer:nil],
             [LRSectionSpec header:L(@"Legal") rows:legal
-                           footer:L(@"LegacyRay is a fork of senko by sqmrak and is distributed under the GNU General Public License, version 2.")],
+                           footer:L(@"LegacyRay is made by the LegacyReborn Project. It is a fork of senko by sqmrak and is distributed under the GNU General Public License, version 2.")],
             nil];
 }
 @end
@@ -93,7 +113,7 @@
 - (NSArray *)buildSections {
     NSArray *qa = [NSArray arrayWithObjects:
         L(@"How do I import?"),
-        L(@"Tap + (on the main screen or in the stations) and paste from the clipboard, scan a QR code, type or paste manually, add a subscription URL or pick a file. vless://, trojan://, ss://, socks5://, happ:// links, subscription URLs, base64 lists, Xray and sing-box JSON, Clash YAML, WireGuard / AmneziaWG profiles and Karing backups (zip or LAN send QR) all work."),
+        L(@"Tap + (on the main screen or in the server list) and paste from the clipboard, scan a QR code, type or paste manually, add a subscription URL or pick a file. vless://, trojan://, ss://, socks5://, happ:// links, subscription URLs, base64 lists, Xray and sing-box JSON, Clash YAML, WireGuard / AmneziaWG profiles and Karing backups (zip or LAN send QR) all work."),
         L(@"Which devices are supported?"),
         L(@"Any jailbroken iPhone, iPod touch or iPad on iOS 4.0 to 7.x. iOS 5 and later redirect the whole device through the pf firewall; on iOS 4 there is no pf, so apps are redirected by the MobileSubstrate hook."),
         L(@"Why can't I connect?"),
@@ -107,9 +127,9 @@
         L(@"What does Stealth mode hide?"),
         L(@"Server addresses, links, device IDs and IP addresses on every screen and in reports, so a screenshot shows nothing private."),
         L(@"Where are the subscription details?"),
-        L(@"Long press a subscription's plate in the station log and choose Subscription info: traffic, dates, the provider's page and support links."),
+        L(@"Long press a subscription's plate in the server list and choose Subscription info: traffic, dates, the provider's page and support links."),
         L(@"How do I delete or reorder items?"),
-        L(@"Long press a station or a plate for its menu. Arrange in the ... menu lets you drag subscriptions and manual stations."),
+        L(@"Long press a server or a plate for its menu. Arrange in the ... menu lets you drag subscriptions and manual servers."),
         L(@"Where can I find the logs?"),
         L(@"Setup > Diagnostics: the daemon log, the firewall rules, the activity journal and a privacy-safe report you can mail or save."),
         nil];

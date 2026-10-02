@@ -208,7 +208,7 @@ static LRConsoleGeometry LRConsoleLayoutFor(CGSize size) {
         default: break;
     }
     if (t.busy) return [self currentStationName];
-    return [catalog isEmpty] ? L(@"Add a station to begin.") : L(@"Tap the button to connect.");
+    return [catalog isEmpty] ? L(@"Add a server to begin.") : L(@"Tap the button to connect.");
 }
 
 - (void)refreshCard {
@@ -225,7 +225,7 @@ static LRConsoleGeometry LRConsoleLayoutFor(CGSize size) {
     LRServer *sv = [catalog selectedServer];
     if (!sv) {
         _card.countryCode = nil;
-        _card.title = [catalog isEmpty] ? L(@"No stations yet") : L(@"Choose a station");
+        _card.title = [catalog isEmpty] ? L(@"No servers yet") : L(@"Choose a server");
         _card.detail = [catalog isEmpty] ? L(@"Tap to add a link, a QR code or a subscription") : nil;
         _card.value = nil;
         return;

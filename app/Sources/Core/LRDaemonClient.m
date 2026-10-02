@@ -23,18 +23,26 @@ static NSString *LRKickPath(void) {
     return @"/usr/bin/legacyray-kick";
 }
 
+/* a CONNECT reply streams "STATE connecting" before its final state, so the
+   answer is the first state that is not "connecting" (the same line
+   reply_tunnel stops reading at). taking the first line made every connect
+   look stuck: the app said "timed out" and tore down a tunnel that was up */
 NSString *LRStateFromReply(NSString *reply, long *uptime) {
     if (uptime) *uptime = 0;
+    BOOL seen = NO;
+    ctl_state_t found = CTL_STATE_IDLE;
     for (NSString *line in [reply componentsSeparatedByString:@"\n"]) {
         NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
         ctl_state_t state;
         long age;
         if (ctl_parse_state([data bytes], [data length], &state, &age) != CTL_OK)
             continue;
+        seen = YES;
+        found = state;
         if (uptime) *uptime = age;
-        return [NSString stringWithUTF8String:ctl_state_name(state)];
+        if (state != CTL_STATE_CONNECTING) break;
     }
-    return nil;
+    return seen ? [NSString stringWithUTF8String:ctl_state_name(found)] : nil;
 }
 
 NSString *LRErrorFromReply(NSString *reply) {
@@ -227,19 +235,31 @@ static int LRWriteAll(int fd, const void *buf, size_t len) {
     LRReplyDoneFn done = LRDoneFnForCommand(cmd);
     NSMutableData *acc = [NSMutableData data];
     char buf[4096];
+    BOOL finished = NO, closed = NO;
     LRSetReadTimeout(fd, timeoutMs > 0 ? timeoutMs : 2000);
     for (;;) {
         ssize_t r = read(fd, buf, sizeof buf);
         if (r > 0) {
             [acc appendBytes:buf length:(NSUInteger)r];
-            if (done([acc bytes], [acc length])) break;
+            if (done([acc bytes], [acc length])) {
+                finished = YES;
+                break;
+            }
             continue;
         }
         if (r < 0 && errno == EINTR) continue;
+        closed = r == 0;
         break;
     }
     close(fd);
     if (![acc length]) return nil;
+    /* a tunnel verb cut off before its final state either lost the daemon
+       (it closed the socket) or ran out of time, and the two need different
+       words for the user */
+    if (!finished && done == reply_tunnel) {
+        const char *mark = closed ? "\n" LR_REPLY_CLOSED "\n" : "\n" LR_REPLY_TIMEOUT "\n";
+        [acc appendBytes:mark length:strlen(mark)];
+    }
     NSString *s = [[[NSString alloc] initWithData:acc encoding:NSUTF8StringEncoding] autorelease];
     if (!s) s = [[[NSString alloc] initWithData:acc encoding:NSISOLatin1StringEncoding] autorelease];
     return s;
@@ -659,7 +679,7 @@ static NSString *LRPercentEncodeField(NSString *s) {
 }
 
 - (void)connectIndex:(int)idx reply:(void (^)(NSString *))done {
-    [self sendCommand:[NSString stringWithFormat:@"CONNECT %d", idx] timeoutMs:45000 reply:done];
+    [self sendCommand:[NSString stringWithFormat:@"CONNECT %d", idx] timeoutMs:60000 reply:done];
 }
 
 - (void)disconnect:(void (^)(NSString *))done {

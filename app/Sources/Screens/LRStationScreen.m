@@ -78,7 +78,7 @@
         LRRow *warn = [LRRow text:L(@"This build cannot dial this protocol on this device (hysteria2 needs the iOS 12+ core).")];
         [info addObject:warn];
     }
-    [sections addObject:[LRSectionSpec header:L(@"Station") rows:info footer:nil]];
+    [sections addObject:[LRSectionSpec header:L(@"Server") rows:info footer:nil]];
 
     NSArray *modes = [NSArray arrayWithObjects:@"tcp", @"handshake", @"proxy", nil];
     NSArray *names = [NSArray arrayWithObjects:L(@"TCP connect"), L(@"TLS / Reality handshake"),
@@ -105,7 +105,7 @@
     BOOL current = [LRPrefs selectedBackend] == LRBackendServer && catalog.selectedIndex == sv.index;
     BOOL live = current && tunnel.state == LRTunnelConnected;
     if (!live)
-        [actions addObject:[LRRow button:[tunnel isOn] ? L(@"Switch to this station") : L(@"Connect")
+        [actions addObject:[LRRow button:[tunnel isOn] ? L(@"Switch to this server") : L(@"Connect")
                                    style:LRRowStyleAccent action:^(LRRow *r, UIView *c) {
             [LRPrefs setSelectedBackend:LRBackendServer];
             [[LRTunnel shared] connectServerIndex:sv.index];
@@ -131,7 +131,7 @@
             [me editLink];
         }]];
         [actions addObject:[LRRow button:L(@"Delete") style:LRRowStyleDestructive action:^(LRRow *r, UIView *c) {
-            [LRAlert confirmTitle:L(@"Delete Station") message:me.title button:L(@"Delete") destructive:YES action:^{
+            [LRAlert confirmTitle:L(@"Delete Server") message:me.title button:L(@"Delete") destructive:YES action:^{
                 [[LRDaemonClient shared] deleteServerIndex:sv.index reply:^(NSString *reply) {
                     [[LRCatalog shared] reload];
                     [me close];
@@ -153,7 +153,7 @@
             if (!clean) return;
             [[LRDaemonClient shared] replaceServerIndex:idx link:clean reply:^(NSString *reply) {
                 if (LRReplyIsOK(reply)) {
-                    [LRToast showSuccess:L(@"Station saved")];
+                    [LRToast showSuccess:L(@"Server saved")];
                     [[LRCatalog shared] reload];
                     [screen close];
                 } else {

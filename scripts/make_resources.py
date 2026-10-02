@@ -4,8 +4,8 @@
 the icons come from art/icon-1024.png (scripts/icon_from_logo.py makes it
 from the logo); the rest is drawn with the cairo prototype of the classic
 finish (scripts/design/classic.py), the same shapes the app draws. run from
-anywhere:    python3 scripts/make_resources.py
-needs python3-cairo and pillow."""
+anywhere:    python3 scripts/make_resources.py [icons]
+("icons" redoes only the icons). needs python3-cairo and pillow."""
 import math
 import os
 import random
@@ -25,7 +25,9 @@ TAU = math.pi * 2
 
 
 def icons():
-    master = Image.open(ART).convert('RGB')
+    # the corners outside the badge stay transparent, and every size is cut
+    # premultiplied so no light seeps into the rim from them
+    master = Image.open(ART).convert('RGBA').convert('RGBa')
     sizes = {
         'Icon.png': 57, 'Icon@2x.png': 114, 'Icon-72.png': 72, 'Icon-72@2x.png': 144,
         'Icon-60@2x.png': 120, 'Icon-76.png': 76, 'Icon-76@2x.png': 152,
@@ -33,7 +35,7 @@ def icons():
         'Icon-Small-50@2x.png': 100,
     }
     for name, size in sizes.items():
-        master.resize((size, size), Image.LANCZOS).save(os.path.join(OUT, name))
+        master.resize((size, size), Image.LANCZOS).convert('RGBA').save(os.path.join(OUT, name))
 
 
 def classic_launch(w, h, scale, status_bar):
@@ -135,6 +137,9 @@ def sounds():
 def main():
     os.makedirs(OUT, exist_ok=True)
     icons()
+    if sys.argv[1:] == ['icons']:
+        print('icons written to', os.path.normpath(OUT))
+        return
     classic.write_denim_tiles()
     launches = [
         ('Default.png', 320, 480, 1, True), ('Default@2x.png', 320, 480, 2, True),

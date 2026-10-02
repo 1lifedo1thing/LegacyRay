@@ -51,10 +51,10 @@ void LRBuildDiagnosticReport(void (^done)(NSString *)) {
             [r appendFormat:@"State: %@\nBackend: %@\n", [t stateTitle],
              t.activeBackend == LRBackendAmneziaWG ? @"amneziawg" : @"vless daemon"];
             LRServer *sv = [[LRCatalog shared] selectedServer];
-            if (sv) [r appendFormat:@"Station: %@\n", [sv protocolSummary]];
+            if (sv) [r appendFormat:@"Server: %@\n", [sv protocolSummary]];
             if (t.lastError) [r appendFormat:@"Last error: %@\n", LRRedact(t.lastError)];
             [r appendFormat:@"Network: %@\n", [LRNetInfo interfaceKind]];
-            [r appendFormat:@"Stations: %lu · Subscriptions: %lu\n\n",
+            [r appendFormat:@"Servers: %lu · Subscriptions: %lu\n\n",
              (unsigned long)[[LRCatalog shared].servers count], (unsigned long)[[LRCatalog shared].subscriptions count]];
             [r appendString:@"Daemon state\n------------\n"];
             if (facts) for (LRDiagFact *fact in facts) [r appendFormat:@"%@ = %@\n", fact.key, LRRedact(fact.value)];

@@ -380,7 +380,7 @@ static NSString *LRDecodeB64(NSString *text) {
     NSUInteger made = [links count] + [confs count];
     if (made) {
         LRLog(@"server", @"own server set up with %lu connection(s)", (unsigned long)made);
-        [log setStage:[errors count] ? L(@"Partly done: see the log") : L(@"Done. The connections are in the station log.")];
+        [log setStage:[errors count] ? L(@"Partly done: see the log") : L(@"Done. The connections are in the server list.")];
         [LRToast showSuccess:L(@"Your server is ready")];
     } else {
         [log setStage:L(@"The install failed: see the log")];

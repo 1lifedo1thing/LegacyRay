@@ -108,7 +108,7 @@ static LRAppDelegate *gShared = nil;
 
 - (void)welcome {
     [LRAlert showTitle:L(@"Welcome to LegacyRay")
-               message:L(@"Tap + to add a server or a subscription, then tap the big button. Hold a station for more.")];
+               message:L(@"Tap + to add a server or a subscription, then tap the big button. Hold a server for more.")];
 }
 
 - (void)applicationDidBecomeActive:(UIApplication *)application {

@@ -173,7 +173,7 @@ static NSString *LRDateText(unsigned long long unix) {
     NSMutableArray *actions = [NSMutableArray array];
     [actions addObject:[LRRow button:_updating ? L(@"Updating...") : L(@"Update Now") style:LRRowStyleAccent
                               action:^(LRRow *r, UIView *c) { [me update]; }]];
-    [actions addObject:[LRRow button:L(@"Check latency of all stations") style:LRRowStyleAccent
+    [actions addObject:[LRRow button:L(@"Check latency of all servers") style:LRRowStyleAccent
                               action:^(LRRow *r, UIView *c) {
         for (LRSection *sec in [LRCatalog shared].sections)
             if (sec.sectionId == sub.index) [[LRCatalog shared] pingServers:sec.servers];

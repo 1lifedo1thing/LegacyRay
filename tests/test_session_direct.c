@@ -69,6 +69,38 @@ static const transport_vt_t fake_vt = {
     fake_open, fake_read, fake_write, fake_raw_write, fake_close, NULL
 };
 
+/* an inner tls 1.2 stream ends the vision padding with END, not DIRECT. the
+   server keeps reading the rest through the outer tls, so every later byte
+   has to be sealed; bare bytes get a protocol_version alert back */
+static void check_tls12_end_stays_sealed(const uint8_t uuid[VLESS_UUID_LEN]) {
+    fake_transport_t ft;
+    memset(&ft, 0, sizeof ft);
+    ft.rx_done = 1;
+
+    session_t s;
+    ok("tls12 init", session_init(&s, &fake_vt, &ft, VL_PROTO_VLESS,
+                                  uuid, "xtls-rprx-vision", NULL, NULL) == SESS_OK);
+    s.state = SESS_RELAY;
+    s.u.vc.state = VC_ST_OPEN;
+
+    size_t consumed = 0;
+    uint8_t hello[] = {0x16, 0x03, 0x01, 0x00, 0x04, 0x01, 0x00, 0x00, 0x00};
+    ok("tls12 hello", session_feed_client(&s, hello, sizeof hello, &consumed) == SESS_OK &&
+                      consumed == sizeof hello);
+    uint8_t app[] = {0x17, 0x03, 0x03, 0x00, 0x03, 'a', 'b', 'c'};
+    ok("tls12 app data", session_feed_client(&s, app, sizeof app, &consumed) == SESS_OK &&
+                         consumed == sizeof app);
+    ok("tls12 padding ended", s.vwrap.end_sent == 1 && s.vwrap.direct_sent == 0);
+    ok("tls12 upstream not direct", s.vision_upstream_direct == 0 &&
+                                    s.vision_upstream_direct_pending == 0);
+    ok("tls12 transport not marked raw", ft.mark_calls == 0);
+
+    ok("tls12 more data", session_feed_client(&s, app, sizeof app, &consumed) == SESS_OK &&
+                          consumed == sizeof app);
+    ok("tls12 later bytes sealed", ft.write_calls == 3 && ft.raw_calls == 0);
+    printf("ok tls 1.2 end stays sealed\n");
+}
+
 /* trojan and shadowsocks carry no distinct response header, so the local
    socks client only learns the tunnel is up from the connect reply below */
 static void check_socks_connect_ack(vl_proto_t proto, const char *user,
@@ -136,6 +168,7 @@ int main(void) {
     ok("framed write used", ft.write_calls == 1);
     ok("raw write not used", ft.raw_calls == 0);
 
+    check_tls12_end_stays_sealed(uuid);
     check_socks_connect_ack(VL_PROTO_TROJAN, NULL, "secret", "trojan socks connect ack");
     check_socks_connect_ack(VL_PROTO_SHADOWSOCKS, "aes-256-gcm", "secret", "shadowsocks socks connect ack");
 

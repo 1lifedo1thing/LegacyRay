@@ -192,11 +192,57 @@ static void LRSetString(NSString **slot, NSString *value) {
 
 @interface LRPlateHeaderView : UIView {
 @public
-    NSString *title, *country, *meta;
+    NSString *title, *country, *meta, *usage, *note;
     BOOL collapsed, pressed;
     CGFloat margin;
 }
 @end
+
+/* one set of metrics for drawing a plate and for the height the table asks
+   for, so the caption lines under a subscription can never be cut off */
+typedef struct {
+    UIFont *title, *usage, *note;
+    CGFloat top, bottom, inset;
+} LRPlateMetrics;
+
+static LRPlateMetrics LRPlateMetricsNow(void) {
+    LRPlateMetrics m;
+    if (SKIN->flat) {
+        m.title = [LRSkin bodyFont:13];
+        m.usage = [LRSkin bodyFont:12];
+        m.note = [LRSkin bodyFont:12];
+        m.top = 9;
+        m.bottom = 8;
+        m.inset = 16;
+    } else {
+        m.title = [LRSkin boldFont:17];
+        m.usage = [LRSkin bodyFont:14];
+        m.note = [LRSkin bodyFont:13];
+        m.top = 17;
+        m.bottom = 6;
+        m.inset = 9;
+    }
+    return m;
+}
+
+/* the column the title and the caption lines share: after the flag, before
+   the chevron */
+static void LRPlateColumn(LRPlateMetrics m, CGFloat width, CGFloat margin, BOOL flag,
+                          CGFloat *x, CGFloat *right) {
+    CGFloat side = SKIN->flat ? 0 : margin;
+    *x = side + m.inset + (flag ? 22 : 0);
+    *right = width - side - m.inset - 16;
+}
+
+/* the provider's words get at most two lines; the full text is on the
+   subscription's own screen */
+static CGFloat LRPlateNoteHeight(LRPlateMetrics m, NSString *note, CGFloat w) {
+    if (![note length] || w <= 0) return 0;
+    CGFloat cap = ceilf(m.note.lineHeight) * 2;
+    CGSize size = [note sizeWithFont:m.note constrainedToSize:CGSizeMake(w, cap)
+                       lineBreakMode:NSLineBreakByTruncatingTail];
+    return MIN(cap, ceilf(size.height));
+}
 
 @implementation LRPlateHeaderView
 - (id)initWithFrame:(CGRect)frame {
@@ -213,52 +259,56 @@ static void LRSetString(NSString **slot, NSString *value) {
     [title release];
     [country release];
     [meta release];
+    [usage release];
+    [note release];
     [super dealloc];
 }
 
 - (void)drawRect:(CGRect)rect {
     CGContextRef ctx = UIGraphicsGetCurrentContext();
     LRSkin *s = SKIN;
+    LRPlateMetrics m = LRPlateMetricsNow();
     CGRect b = self.bounds;
     UIColor *ink = s->groupHeader;
+    UIColor *muted = s->flat ? s->groupMuted : s->groupHeader;
     UIColor *shadow = s->flat ? nil : s->groupHeaderShadow;
-    CGFloat midY;
-    CGFloat x, right;
-    UIFont *tf, *mf;
-    NSString *shown = title;
+    NSString *shown = s->flat ? [title uppercaseString] : title;
     if (s->flat) {
         [(pressed ? s->groupPressed : s->background) setFill];
         CGContextFillRect(ctx, b);
         [s->separator setFill];
         CGContextFillRect(ctx, CGRectMake(0, b.size.height - LRHairline(), b.size.width, LRHairline()));
-        midY = CGRectGetMidY(b);
-        x = 16;
-        right = b.size.width - 16;
-        tf = [LRSkin bodyFont:13];
-        mf = [LRSkin bodyFont:12];
-        shown = [title uppercaseString];
-    } else {
-        /* a caption over its group, like any ios 6 section header */
-        midY = b.size.height - 16;
-        x = margin + 9;
-        right = b.size.width - margin - 9;
-        tf = [LRSkin boldFont:17];
-        mf = [LRSkin bodyFont:14];
-        if (pressed) ink = LRColorAlpha(ink, 0.6f);
+    } else if (pressed) {
+        ink = LRColorAlpha(ink, 0.6f);
+        muted = LRColorAlpha(muted, 0.6f);
     }
-    if ([country length] == 2) {
-        LRDrawFlag(ctx, country, CGRectMake(x, roundf(midY - 8), 16, 16));
-        x += 22;
-    }
-    LRDrawChevron(ctx, CGPointMake(right - 4, midY), 4, !collapsed, ink, s->flat ? 1.6f : 2);
-    right -= 16;
-    CGFloat metaW = [meta length] ? MIN([meta sizeWithFont:mf].width, (right - x) * 0.45f) : 0;
+    BOOL flag = [country length] == 2;
+    CGFloat x, right;
+    LRPlateColumn(m, b.size.width, margin, flag, &x, &right);
+    CGFloat titleH = ceilf(m.title.lineHeight);
+    BOOL captioned = [usage length] || [note length];
+    /* a lone title keeps the old place: centred on a flat plate, on the
+       bottom line of an ios 6 section header */
+    CGFloat titleY = captioned ? m.top
+        : (s->flat ? roundf((b.size.height - titleH) / 2) : b.size.height - 16 - roundf(titleH / 2));
+    CGFloat midY = titleY + roundf(titleH / 2);
+    if (flag) LRDrawFlag(ctx, country, CGRectMake(x - 22, roundf(midY - 8), 16, 16));
+    LRDrawChevron(ctx, CGPointMake(right + 12, midY), 4, !collapsed, ink, s->flat ? 1.6f : 2);
+    CGFloat metaW = [meta length] ? MIN([meta sizeWithFont:m.usage].width, (right - x) * 0.45f) : 0;
     if (metaW > 0)
-        LRDrawEngraved(meta, CGRectMake(right - metaW, roundf(midY - mf.lineHeight / 2), metaW, mf.lineHeight),
-                       mf, NSTextAlignmentRight, ink, shadow, 1);
+        LRDrawEngraved(meta, CGRectMake(right - metaW, roundf(midY - m.usage.lineHeight / 2), metaW,
+                                        m.usage.lineHeight), m.usage, NSTextAlignmentRight, muted, shadow, 1);
     CGFloat titleW = right - (metaW > 0 ? metaW + 8 : 0) - x;
-    LRDrawEngraved(shown, CGRectMake(x, roundf(midY - tf.lineHeight / 2), titleW, tf.lineHeight), tf,
-                   NSTextAlignmentLeft, ink, shadow, 1);
+    LRDrawEngraved(shown, CGRectMake(x, titleY, titleW, titleH), m.title, NSTextAlignmentLeft, ink, shadow, 1);
+    CGFloat y = titleY + titleH + 1;
+    if ([usage length]) {
+        CGFloat h = ceilf(m.usage.lineHeight);
+        LRDrawEngraved(usage, CGRectMake(x, y, right - x, h), m.usage, NSTextAlignmentLeft, muted, shadow, 1);
+        y += h + 1;
+    }
+    CGFloat noteH = LRPlateNoteHeight(m, note, right - x);
+    if (noteH > 0)
+        LRDrawEngraved(note, CGRectMake(x, y, right - x, noteH), m.note, NSTextAlignmentLeft, muted, shadow, 1);
 }
 @end
 
@@ -288,13 +338,29 @@ static void LRSetString(NSString **slot, NSString *value) {
 }
 
 - (void)showTitle:(NSString *)title country:(NSString *)code meta:(NSString *)meta
+            usage:(NSString *)usage note:(NSString *)note
         collapsed:(BOOL)collapsed margin:(CGFloat)margin {
     LRPlateHeaderView *p = (LRPlateHeaderView *)_plate;
     [p->title release]; p->title = [title copy];
     [p->country release]; p->country = [code copy];
     [p->meta release]; p->meta = [meta copy];
+    [p->usage release]; p->usage = [usage copy];
+    [p->note release]; p->note = [note copy];
     p->collapsed = collapsed;
     p->margin = margin;
     [p setNeedsDisplay];
+}
+
++ (CGFloat)heightWithCountry:(NSString *)code usage:(NSString *)usage note:(NSString *)note
+                       width:(CGFloat)width margin:(CGFloat)margin {
+    CGFloat plain = SKIN->flat ? 34 : LR_PLATE_ROW_HEIGHT;
+    if (![usage length] && ![note length]) return plain;
+    LRPlateMetrics m = LRPlateMetricsNow();
+    CGFloat x, right;
+    LRPlateColumn(m, width, margin, [code length] == 2, &x, &right);
+    CGFloat h = m.top + ceilf(m.title.lineHeight) + 1;
+    if ([usage length]) h += ceilf(m.usage.lineHeight) + 1;
+    h += LRPlateNoteHeight(m, note, right - x);
+    return MAX(plain, ceilf(h + m.bottom));
 }
 @end

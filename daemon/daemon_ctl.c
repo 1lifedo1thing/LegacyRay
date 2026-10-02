@@ -320,6 +320,9 @@ int daemon_ctl_apply(void *ctx, const ctl_action_t *action) {
                     status_set(0);
                     return DCTL_ERR_DNS;
                 }
+                /* the bypass is built from exactly these addresses, and once
+                   the rules are up dns goes through the tunnel itself */
+                if (!quic_only) dialer_pin_ipv4(&d->dialer, ip_list);
 
                 /* the verification target only has to be a stable public
                    address, and resolving it again on every connect put a dns
@@ -1518,7 +1521,10 @@ static int tunnel_carry_probe(daemon_ctl_t *d, int timeout_ms, int *ms_out,
     long deadline = start + timeout_ms;
     const char *stage = "tunnel verify failed";
     uint16_t sp;
-    char probe_ip[INET6_ADDRSTRLEN];
+/* the server resolves the probe host. once the firewall owns dns a local
+   lookup would go into the tunnel this probe is trying to prove, while
+   nothing pumps the loop that has to carry it */
+    static const char probe_host[] = "example.com";
 
     if (!d || !d->loop) {
         stage = "socks not ready";
@@ -1529,17 +1535,10 @@ static int tunnel_carry_probe(daemon_ctl_t *d, int timeout_ms, int *ms_out,
         stage = "socks not ready";
         goto fail;
     }
-    if (!net_resolve_public("example.com", 443, probe_ip, sizeof probe_ip)) {
-        stage = "probe dns rejected";
-        stage_mark(d, "probe resolve", 0);
-        goto fail;
-    }
-    stage_mark(d, "probe resolve", 1);
-
     {
         long half = start + (timeout_ms * 6) / 10; /* reserve time for http */
         if (half > deadline) half = deadline;
-        int fd = socks_dial_retry(d, sp, probe_ip, 443, half, &stage);
+        int fd = socks_dial_retry(d, sp, probe_host, 443, half, &stage);
         stage_mark(d, "tunnel dial 443", fd >= 0);
         if (fd >= 0) {
             uint8_t rec[2100];
@@ -1567,11 +1566,7 @@ static int tunnel_carry_probe(daemon_ctl_t *d, int timeout_ms, int *ms_out,
     }
 
     {
-        if (!net_resolve_public("example.com", 80, probe_ip, sizeof probe_ip)) {
-            stage = "probe dns rejected";
-            goto fail;
-        }
-        int fd = socks_dial_retry(d, sp, probe_ip, 80, deadline, &stage);
+        int fd = socks_dial_retry(d, sp, probe_host, 80, deadline, &stage);
         stage_mark(d, "tunnel dial 80", fd >= 0);
         if (fd < 0) goto fail;
 
@@ -1792,6 +1787,8 @@ static int prepare_server_probe(daemon_ctl_t *d, const vl_server_t *server,
         return -1;
     }
     dialer_set_target(&d->dialer, server->host, server->port);
+    /* the probe dials the address it just checked; an ipv6 one stays unpinned */
+    dialer_pin_ipv4(&d->dialer, public_ip);
     if (loop_set_server(d->loop, vt, dialer_connect, &d->dialer,
                         server->proto, uuid, server->flow,
                         server->user, server->pass, server->sni, server->fp,
