@@ -3,7 +3,12 @@
 #include "pf_natlook.h"
 #include "senko_trace.h"
 #include "socks5.h"
+#include "sniff.h"
+#include "net_safe.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <netdb.h>
+#include <netinet/tcp.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -40,6 +45,110 @@ static void drain_wake(loop_t *lp) {
     }
 }
 
+static long loop_now_ms(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long)tv.tv_sec * 1000L + (long)(tv.tv_usec / 1000);
+}
+
+/* how long a connection waits for the client to say which site it wants.
+   tls and http clients speak first and at once; a server-first protocol just
+   pays this once and is routed by its address */
+#define LOOP_SNIFF_MS 300
+/* a relay nothing moved through for this long belongs to a peer that went
+   away without a word, usually on the other side of a wifi/cellular move */
+#define LOOP_IDLE_MS (20L * 60L * 1000L)
+#define LOOP_DIRECT_CONNECT_MS 10000
+
+/* dead peers are found by the kernel instead of holding a slot forever */
+static void set_keepalive(int fd) {
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof one);
+#ifdef TCP_KEEPALIVE
+    int idle = 60;
+    setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &idle, sizeof idle);
+#endif
+}
+
+/* connect to the destination itself. the router already said this address
+   goes around the tunnel; the bypass hook keeps the firewall from handing the
+   connection straight back to the daemon */
+static int direct_dial(loop_t *lp, const vless_dest_t *dest) {
+    struct sockaddr_storage ss;
+    socklen_t ss_len = 0;
+    memset(&ss, 0, sizeof ss);
+    char ip[INET6_ADDRSTRLEN];
+    if (dest->atyp == VLESS_ADDR_IPV4) {
+        struct sockaddr_in *sin = (struct sockaddr_in *)&ss;
+        sin->sin_family = AF_INET;
+        memcpy(&sin->sin_addr, dest->host_addr, 4);
+        sin->sin_port = htons(dest->port);
+        ss_len = sizeof *sin;
+    } else if (dest->atyp == VLESS_ADDR_IPV6) {
+        struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&ss;
+        sin6->sin6_family = AF_INET6;
+        memcpy(&sin6->sin6_addr, dest->host_addr, 16);
+        sin6->sin6_port = htons(dest->port);
+        ss_len = sizeof *sin6;
+    } else {
+        struct addrinfo hints, *res = NULL;
+        memset(&hints, 0, sizeof hints);
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        char port[8];
+        snprintf(port, sizeof port, "%u", (unsigned)dest->port);
+        if (net_getaddrinfo_timed(dest->domain, port, &hints, &res, 3000) != 0 || !res)
+            return -1;
+        memcpy(&ss, res->ai_addr, res->ai_addrlen);
+        ss_len = res->ai_addrlen;
+        freeaddrinfo(res);
+    }
+    if (ss.ss_family == AF_INET) {
+        const struct sockaddr_in *sin = (const struct sockaddr_in *)&ss;
+        if (!inet_ntop(AF_INET, &sin->sin_addr, ip, sizeof ip)) return -1;
+        if (lp->bypass && lp->bypass(lp->route_ctx, ip) != 0) return -1;
+    } else if (lp->bypass) {
+        /* the firewall bypass is ipv4 only */
+        if (lp->bypass(lp->route_ctx, NULL) != 0) return -1;
+    }
+
+    int fd = socket(ss.ss_family, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
+    set_nonblock(fd);
+    int r = connect(fd, (struct sockaddr *)&ss, ss_len);
+    if (r != 0 && errno != EINPROGRESS) { close(fd); return -1; }
+    if (r != 0) {
+        struct pollfd w;
+        w.fd = fd; w.events = POLLOUT; w.revents = 0;
+        int pr;
+        do { pr = poll(&w, 1, LOOP_DIRECT_CONNECT_MS); } while (pr < 0 && errno == EINTR);
+        int err = 0;
+        socklen_t el = sizeof err;
+        if (pr <= 0 || getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el) != 0 || err != 0) {
+            close(fd);
+            return -1;
+        }
+    }
+    int one = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+    set_keepalive(fd);
+    return fd;
+}
+
+static void *direct_worker_main(void *arg) {
+    loop_conn_t *c = (loop_conn_t *)arg;
+    loop_t *lp = c->owner;
+    int fd = direct_dial(lp, &c->tproxy_dest);
+    pthread_mutex_lock(&lp->open_lock);
+    c->remote_fd = fd;
+    /* any non-null handle means the open worked */
+    c->open_th = fd >= 0 ? (void *)c : NULL;
+    c->open_done = 1;
+    pthread_mutex_unlock(&lp->open_lock);
+    wake_loop(lp);
+    return NULL;
+}
+
 static void *open_worker_main(void *arg) {
     loop_conn_t *c = (loop_conn_t *)arg;
     loop_t *lp = c->owner;
@@ -62,6 +171,7 @@ static void *open_worker_main(void *arg) {
             int rfd = lp->dial(lp->dial_ctx);
             if (rfd < 0) continue;
             set_nonblock(rfd);
+            set_keepalive(rfd);
             c->remote_fd = rfd;
         }
         th = c->open_vt->open(c->remote_fd, &c->open_tls_cfg);
@@ -234,18 +344,38 @@ void loop_set_tls(loop_t *lp, const char *sni, const char *fingerprint,
     lp->tls_cfg.insecure = lp->insecure;
 }
 
+/* a connection's buffers run to a couple of hundred kilobytes, so a slot is
+   only allocated while it is in use. a fixed array of them kept tens of
+   megabytes resident in a daemon on a phone with 256 MB in all */
 static loop_conn_t *alloc_conn(loop_t *lp) {
     for (size_t i = 0; i < LOOP_MAX_CONNS; ++i) {
-        if (!lp->conns[i].used) {
-            loop_conn_t *c = &lp->conns[i];
-            memset(c, 0, sizeof *c);
-            c->owner = lp;
-            c->local_fd = -1;
-            c->remote_fd = -1;
-            return c;
+        loop_conn_t *c = lp->conns[i];
+        if (c && c->used) continue;
+        if (!c) {
+            c = (loop_conn_t *)malloc(sizeof *c);
+            if (!c) return NULL;
+            lp->conns[i] = c;
         }
+        memset(c, 0, sizeof *c);
+        c->owner = lp;
+        c->local_fd = -1;
+        c->remote_fd = -1;
+        c->last_io_ms = loop_now_ms();
+        return c;
     }
     return NULL;
+}
+
+/* slots are released outside dispatch, so no pointer taken during one poll
+   round can outlive its memory */
+static void free_unused_slots(loop_t *lp) {
+    for (size_t i = 0; i < LOOP_MAX_CONNS; ++i) {
+        loop_conn_t *c = lp->conns[i];
+        if (c && !c->used) {
+            free(c);
+            lp->conns[i] = NULL;
+        }
+    }
 }
 
 static int flush_pend_local(loop_conn_t *c);
@@ -287,6 +417,46 @@ static int read_local_into_prebuf(loop_conn_t *c) {
     }
 }
 
+/* the socks greeting and request are answered locally, before the remote
+   transport is open. the request bytes stay in prebuf for the session (or
+   are dropped for a direct relay); the session's own reply is skipped later.
+   -1 means the client spoke something that is not socks */
+static int socks_early(loop_conn_t *c) {
+    if (c->transparent) return 0;
+    if (!c->socks_greet_done && c->prebuf_len > 0) {
+        size_t used = 0;
+        s5_status_t gr = socks5_parse_greeting(c->prebuf, c->prebuf_len, &used);
+        if (gr == S5_NEED_MORE) return 0;
+        if (gr != S5_OK) return -1;
+        uint8_t reply[2];
+        size_t rn = 0;
+        if (socks5_build_method_reply(reply, sizeof reply, &rn) != S5_OK ||
+            pend_append(c, reply, rn) != 0 || flush_pend_local(c) != 0)
+            return -1;
+        c->socks_greet_done = 1;
+        memmove(c->prebuf, c->prebuf + used, c->prebuf_len - used);
+        c->prebuf_len -= used;
+    }
+    if (c->socks_greet_done && !c->socks_req_done && c->prebuf_len > 0) {
+        vless_dest_t dest;
+        size_t used = 0;
+        s5_status_t rr = socks5_parse_request(c->prebuf, c->prebuf_len, &dest, &used);
+        if (rr == S5_NEED_MORE) return 0;
+        /* anything odd is left for the session, which answers it properly */
+        if (rr != S5_OK) { c->socks_req_done = 1; return 0; }
+        uint8_t rep[10];
+        size_t rn = 0;
+        if (socks5_build_reply(SOCKS5_REP_OK, rep, sizeof rep, &rn) != S5_OK ||
+            pend_append(c, rep, rn) != 0 || flush_pend_local(c) != 0)
+            return -1;
+        c->socks_req_done = 1;
+        c->socks_req_len = used;
+        c->socks_reply_skip = rn;
+        c->tproxy_dest = dest;
+    }
+    return 0;
+}
+
 /* answer SOCKS while the worker opens the remote transport */
 static void service_opening_local(loop_t *lp, loop_conn_t *c, short local_re) {
     if (local_re & (POLLHUP | POLLERR)) {
@@ -303,28 +473,8 @@ static void service_opening_local(loop_t *lp, loop_conn_t *c, short local_re) {
             return;
         }
     }
-
-    if (!c->transparent && !c->socks_greet_done && c->prebuf_len > 0) {
-        size_t used = 0;
-        s5_status_t gr = socks5_parse_greeting(c->prebuf, c->prebuf_len, &used);
-        if (gr == S5_OK) {
-            uint8_t reply[2];
-            size_t rn = 0;
-            if (socks5_build_method_reply(reply, sizeof reply, &rn) != S5_OK ||
-                pend_append(c, reply, rn) != 0 ||
-                flush_pend_local(c) != 0) {
-                cancel_opening_conn(lp, c);
-                return;
-            }
-            c->socks_greet_done = 1;
-            memmove(c->prebuf, c->prebuf + used, c->prebuf_len - used);
-            c->prebuf_len -= used;
-        } else if (gr != S5_NEED_MORE) {
-            cancel_opening_conn(lp, c);
-            return;
-        }
-    }
-
+    /* a direct relay has no session to read the socks request later */
+    if (!c->direct && socks_early(c) != 0) cancel_opening_conn(lp, c);
 }
 
 static void cancel_opening_conn(loop_t *lp, loop_conn_t *c) {
@@ -341,18 +491,26 @@ static void cancel_opening_conn(loop_t *lp, loop_conn_t *c) {
         shutdown(c->remote_fd, SHUT_RDWR);
 }
 
+static void discard_conn(loop_conn_t *c);
+
 static void drop_conn(loop_t *lp, loop_conn_t *c) {
     if (!c->used) return;
     if (c->opening) {
         cancel_opening_conn(lp, c);
         return;
     }
-    if (c->relay_clean && c->th && c->open_vt && c->open_vt->shutdown)
-        c->open_vt->shutdown(c->th);
-    session_trace_close(&c->sess, "drop");
-    if (c->sess.state == SESS_ERROR)
-        fprintf(stderr, "legacyrayd: dropping errored session\n");
-    if (c->th && c->open_vt) c->open_vt->close(c->th);
+    if (c->sniffing) {
+        discard_conn(c);
+        return;
+    }
+    if (!c->direct) {
+        if (c->relay_clean && c->th && c->open_vt && c->open_vt->shutdown)
+            c->open_vt->shutdown(c->th);
+        session_trace_close(&c->sess, "drop");
+        if (c->sess.state == SESS_ERROR)
+            fprintf(stderr, "legacyrayd: dropping errored session\n");
+        if (c->th && c->open_vt) c->open_vt->close(c->th);
+    }
     if (c->remote_fd >= 0) close(c->remote_fd);
     if (c->local_fd >= 0)  close(c->local_fd);
     clear_conn_slot(c);
@@ -362,13 +520,14 @@ static void drop_conn(loop_t *lp, loop_conn_t *c) {
 /* drop connections when switching servers; keep the listener open */
 static void drop_all_conns(loop_t *lp) {
     for (size_t i = 0; i < LOOP_MAX_CONNS; ++i) {
-        if (!lp->conns[i].used) continue;
-        if (lp->conns[i].opening) cancel_opening_conn(lp, &lp->conns[i]);
-        else drop_conn(lp, &lp->conns[i]);
+        loop_conn_t *c = lp->conns[i];
+        if (!c || !c->used) continue;
+        if (c->opening) cancel_opening_conn(lp, c);
+        else drop_conn(lp, c);
     }
     for (size_t i = 0; i < LOOP_MAX_CONNS; ++i) {
-        loop_conn_t *c = &lp->conns[i];
-        if (!c->used || !c->opening) continue;
+        loop_conn_t *c = lp->conns[i];
+        if (!c || !c->used || !c->opening) continue;
         pthread_join(c->open_thread, NULL);
         c->opening = 0;
         c->open_done = 0;
@@ -382,8 +541,8 @@ static void drop_all_conns(loop_t *lp) {
 
 static void reap_opening_conns(loop_t *lp) {
     for (size_t i = 0; i < LOOP_MAX_CONNS; ++i) {
-        loop_conn_t *c = &lp->conns[i];
-        if (!c->used || !c->opening) continue;
+        loop_conn_t *c = lp->conns[i];
+        if (!c || !c->used || !c->opening) continue;
 
         pthread_mutex_lock(&lp->open_lock);
         int done = c->open_done;
@@ -400,12 +559,26 @@ static void reap_opening_conns(loop_t *lp) {
 
         if (cancelled || !th) {
             if (!cancelled && !th)
-                fprintf(stderr, "legacyrayd: transport open failed (tproxy=%d)\n",
-                        c->transparent);
+                fprintf(stderr, "legacyrayd: %s open failed (tproxy=%d)\n",
+                        c->direct ? "direct" : "transport", c->transparent);
             if (c->local_fd >= 0) close(c->local_fd);
-            if (th && c->open_vt) c->open_vt->close(th);
+            if (th && c->open_vt && !c->direct) c->open_vt->close(th);
             if (c->remote_fd >= 0) close(c->remote_fd);
             clear_conn_slot(c);
+            continue;
+        }
+
+        if (c->direct) {
+            /* raw relay: the socks request was for the daemon, not the site */
+            if (!c->transparent && c->socks_req_len) {
+                size_t drop = c->socks_req_len < c->prebuf_len ? c->socks_req_len
+                                                               : c->prebuf_len;
+                memmove(c->prebuf, c->prebuf + drop, c->prebuf_len - drop);
+                c->prebuf_len -= drop;
+                c->socks_req_len = 0;
+            }
+            c->last_io_ms = loop_now_ms();
+            lp->nconns++;
             continue;
         }
 
@@ -589,32 +762,149 @@ static void fill_open_fields(loop_t *lp, loop_conn_t *c) {
     c->open_tls_cfg.insecure = c->open_insecure;
 }
 
-static int start_opening(loop_t *lp, loop_conn_t *c, int cfd) {
-    set_nonblock(cfd);
-    /* the worker retries a failed first dial */
-    int rfd = lp->dial(lp->dial_ctx);
-    if (rfd >= 0) set_nonblock(rfd);
-
-    c->local_fd = cfd;
-    c->remote_fd = rfd;
-    fill_open_fields(lp, c);
-    c->used = 1;
+/* hand a connection whose client socket is set to a worker that dials and
+   opens the tunnel transport */
+static int begin_open(loop_t *lp, loop_conn_t *c) {
+    if (lp->nopening >= LOOP_MAX_OPENING) {
+        fprintf(stderr, "legacyrayd: drop: opening cap %zu\n", lp->nopening);
+        return -1;
+    }
+    /* the worker dials: a name lookup for the server must never stall the
+       loop that carries every other connection */
+    c->remote_fd = -1;
+    if (!c->direct) fill_open_fields(lp, c);
+    c->sniffing = 0;
     c->opening = 1;
     lp->nopening++;
 
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, LOOP_OPEN_STACK_SZ);
-    int cr = pthread_create(&c->open_thread, &attr, open_worker_main, c);
+    int cr = pthread_create(&c->open_thread, &attr,
+                            c->direct ? direct_worker_main : open_worker_main, c);
     pthread_attr_destroy(&attr);
     if (cr != 0) {
         lp->nopening--;
+        c->opening = 0;
         if (c->remote_fd >= 0) close(c->remote_fd);
-        if (c->local_fd >= 0) close(c->local_fd);
-        clear_conn_slot(c);
+        c->remote_fd = -1;
         return -1;
     }
     return 0;
+}
+
+static void discard_conn(loop_conn_t *c) {
+    if (c->local_fd >= 0) close(c->local_fd);
+    if (c->remote_fd >= 0) close(c->remote_fd);
+    clear_conn_slot(c);
+}
+
+static void route_log(const loop_conn_t *c, const char *host, loop_route_t r) {
+    char addr[INET6_ADDRSTRLEN] = "?";
+    const vless_dest_t *d = &c->tproxy_dest;
+    if (d->atyp == VLESS_ADDR_IPV4) inet_ntop(AF_INET, d->host_addr, addr, sizeof addr);
+    else if (d->atyp == VLESS_ADDR_IPV6) inet_ntop(AF_INET6, d->host_addr, addr, sizeof addr);
+    else snprintf(addr, sizeof addr, "%.40s", d->domain);
+    if (r == LOOP_ROUTE_PROXY) return; /* the common case stays out of the log */
+    fprintf(stderr, "legacyrayd: route %s:%u%s%s -> %s\n", addr, (unsigned)d->port,
+            host && host[0] ? " " : "", host ? host : "",
+            r == LOOP_ROUTE_DIRECT ? "direct" : "block");
+}
+
+/* the router's answer for a connection whose destination is known */
+static void apply_route(loop_t *lp, loop_conn_t *c, loop_route_t r, const char *host) {
+    route_log(c, host, r);
+    if (r == LOOP_ROUTE_BLOCK) {
+        discard_conn(c);
+        return;
+    }
+    c->direct = (r == LOOP_ROUTE_DIRECT);
+    if (begin_open(lp, c) != 0) discard_conn(c);
+}
+
+/* the destination is known (transparent redirect, or a socks request read
+   early): ask the router, and either decide or start waiting for the name */
+static void route_known(loop_t *lp, loop_conn_t *c) {
+    loop_route_t r = lp->route ? lp->route(lp->route_ctx, &c->tproxy_dest, NULL)
+                               : LOOP_ROUTE_PROXY;
+    if (r != LOOP_ROUTE_SNIFF) {
+        apply_route(lp, c, r, NULL);
+        return;
+    }
+    c->sniffing = 2; /* destination known, waiting for the site name */
+    c->sniff_deadline_ms = loop_now_ms() + LOOP_SNIFF_MS;
+}
+
+/* look at what the client sent so far. force decides with whatever is there */
+static void try_sniff(loop_t *lp, loop_conn_t *c, int force) {
+    size_t off = c->transparent ? 0 : c->socks_req_len;
+    char host[256];
+    sniff_status_t st = c->prebuf_len > off
+        ? sniff_host(c->prebuf + off, c->prebuf_len - off, sizeof c->prebuf - off,
+                     host, sizeof host)
+        : SNIFF_NEED_MORE;
+    if (st == SNIFF_NEED_MORE && !force) return;
+    if (st != SNIFF_FOUND) host[0] = '\0';
+    loop_route_t r = lp->route ? lp->route(lp->route_ctx, &c->tproxy_dest, host)
+                               : LOOP_ROUTE_PROXY;
+    if (r == LOOP_ROUTE_SNIFF) r = LOOP_ROUTE_PROXY;
+    apply_route(lp, c, r, host);
+}
+
+/* a connection that has not been handed to a worker yet: socks handshake,
+   then the first client bytes for the router */
+static void service_sniffing(loop_t *lp, loop_conn_t *c, short local_re) {
+    if (local_re & POLLOUT) {
+        if (flush_pend_local(c) != 0) { discard_conn(c); return; }
+    }
+    if (local_re & POLLIN) {
+        if (read_local_into_prebuf(c) != 0) {
+            /* a client that closed before saying anything has nothing to route */
+            discard_conn(c);
+            return;
+        }
+    } else if (local_re & (POLLHUP | POLLERR)) {
+        discard_conn(c);
+        return;
+    }
+    if (c->sniffing == 1) {
+        if (socks_early(c) != 0) { discard_conn(c); return; }
+        if (!c->socks_req_done) return;
+        if (!c->socks_reply_skip) {
+            /* a request the early parser did not take: the tunnel session
+               answers it */
+            apply_route(lp, c, LOOP_ROUTE_PROXY, NULL);
+            return;
+        }
+        route_known(lp, c);
+        if (c->used && c->sniffing == 2) try_sniff(lp, c, 0);
+        return;
+    }
+    try_sniff(lp, c, c->prebuf_len >= sizeof c->prebuf);
+}
+
+static void sniff_deadlines(loop_t *lp) {
+    long now = 0;
+    for (size_t i = 0; i < LOOP_MAX_CONNS; ++i) {
+        loop_conn_t *c = lp->conns[i];
+        if (!c || !c->used || !c->sniffing) continue;
+        if (!now) now = loop_now_ms();
+        if (now < c->sniff_deadline_ms) continue;
+        if (c->sniffing == 2) try_sniff(lp, c, 1);
+        else discard_conn(c); /* a socks client that never finished its request */
+    }
+}
+
+static loop_conn_t *new_client(loop_t *lp, int cfd, const char *what) {
+    loop_conn_t *c = alloc_conn(lp);
+    if (!c) {
+        fprintf(stderr, "legacyrayd: drop %s: conn cap\n", what);
+        return NULL;
+    }
+    set_nonblock(cfd);
+    c->local_fd = cfd;
+    c->used = 1;
+    return c;
 }
 
 static void accept_one(loop_t *lp) {
@@ -624,21 +914,15 @@ static void accept_one(loop_t *lp) {
     /* refuse clients until a server is selected */
     if (!lp->active || !lp->vt || !lp->dial) { close(cfd); return; }
 
-    loop_conn_t *c = alloc_conn(lp);
-    if (!c) {
-        fprintf(stderr, "legacyrayd: drop accept: conn cap\n");
-        close(cfd);
+    loop_conn_t *c = new_client(lp, cfd, "accept");
+    if (!c) { close(cfd); return; }
+    if (lp->route) {
+        /* the socks request comes first, the router needs its address */
+        c->sniffing = 1;
+        c->sniff_deadline_ms = loop_now_ms() + 5000;
         return;
     }
-    if (lp->nopening >= LOOP_MAX_OPENING) {
-        fprintf(stderr, "legacyrayd: drop accept: opening cap %zu\n", lp->nopening);
-        clear_conn_slot(c);
-        close(cfd);
-        return;
-    }
-
-    if (start_opening(lp, c, cfd) != 0)
-        close(cfd);
+    if (begin_open(lp, c) != 0) discard_conn(c);
 }
 
 static void accept_tproxy_one(loop_t *lp) {
@@ -679,18 +963,8 @@ static void accept_tproxy_one(loop_t *lp) {
     snprintf(lp->tproxy_last_host, sizeof lp->tproxy_last_host, "%s", host);
     lp->tproxy_last_port = dport;
 
-    loop_conn_t *c = alloc_conn(lp);
-    if (!c) {
-        fprintf(stderr, "legacyrayd: drop tproxy: conn cap\n");
-        close(cfd);
-        return;
-    }
-    if (lp->nopening >= LOOP_MAX_OPENING) {
-        fprintf(stderr, "legacyrayd: drop tproxy: opening cap %zu\n", lp->nopening);
-        clear_conn_slot(c);
-        close(cfd);
-        return;
-    }
+    loop_conn_t *c = new_client(lp, cfd, "tproxy");
+    if (!c) { close(cfd); return; }
 
     memset(&c->tproxy_dest, 0, sizeof c->tproxy_dest);
     c->tproxy_dest.port = dport;
@@ -703,9 +977,7 @@ static void accept_tproxy_one(loop_t *lp) {
         snprintf(c->tproxy_dest.domain, sizeof c->tproxy_dest.domain, "%s", host);
     }
     c->transparent = 1;
-
-    if (start_opening(lp, c, cfd) != 0)
-        close(cfd);
+    route_known(lp, c);
 }
 
 /* flush queued bytes without blocking */
@@ -746,6 +1018,12 @@ static int flush_to_local(loop_conn_t *c) {
         if (n == 0) return 0; /* session has nothing more */
         c->pend_len = n;
         c->pend_off = 0;
+        if (c->socks_reply_skip) {
+            /* the client already has its socks reply */
+            size_t skip = c->socks_reply_skip < n ? c->socks_reply_skip : n;
+            c->socks_reply_skip -= skip;
+            c->pend_off = skip;
+        }
         while (c->pend_off < c->pend_len) {
             ssize_t w = write(c->local_fd, c->pend + c->pend_off,
                               c->pend_len - c->pend_off);
@@ -762,8 +1040,66 @@ static int flush_to_local(loop_conn_t *c) {
     }
 }
 
+/* move what the client sent (kept in prebuf) to the destination */
+static int direct_flush_up(loop_conn_t *c) {
+    while (c->prebuf_len > 0) {
+        ssize_t w = write(c->remote_fd, c->prebuf, c->prebuf_len);
+        if (w > 0) {
+            memmove(c->prebuf, c->prebuf + w, c->prebuf_len - (size_t)w);
+            c->prebuf_len -= (size_t)w;
+            continue;
+        }
+        if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return 0;
+        if (w < 0 && errno == EINTR) continue;
+        return -1;
+    }
+    if (c->local_eof) shutdown(c->remote_fd, SHUT_WR);
+    return 0;
+}
+
+/* a relay around the tunnel: prebuf carries client bytes up, pend carries
+   the site's bytes down, each side half closes when the other is done */
+static void service_direct(loop_t *lp, loop_conn_t *c, short local_re, short remote_re) {
+    int moved = 0;
+    if ((local_re & POLLIN) && !c->local_eof && c->prebuf_len < sizeof c->prebuf) {
+        size_t before = c->prebuf_len;
+        /* -1 is the client's eof or a reset: either way it sends no more */
+        if (read_local_into_prebuf(c) != 0) c->local_eof = 1;
+        if (c->prebuf_len != before) moved = 1;
+    }
+    if (c->prebuf_len > 0 || (remote_re & POLLOUT) || c->local_eof) {
+        if (direct_flush_up(c) != 0) { drop_conn(lp, c); return; }
+    }
+    if ((remote_re & (POLLIN | POLLHUP | POLLERR)) && !c->remote_eof &&
+        c->pend_off >= c->pend_len) {
+        ssize_t n = read(c->remote_fd, c->pend, sizeof c->pend);
+        if (n > 0) {
+            c->pend_len = (size_t)n;
+            c->pend_off = 0;
+            moved = 1;
+        } else if (n == 0) {
+            c->remote_eof = 1;
+        } else if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+            drop_conn(lp, c);
+            return;
+        }
+    }
+    if (flush_pend_local(c) != 0) { drop_conn(lp, c); return; }
+    if (c->remote_eof && c->pend_off >= c->pend_len) shutdown(c->local_fd, SHUT_WR);
+    if (moved) c->last_io_ms = loop_now_ms();
+    if ((c->local_eof && c->remote_eof && c->prebuf_len == 0 && c->pend_off >= c->pend_len) ||
+        ((local_re & (POLLHUP | POLLERR)) && !(local_re & POLLIN) && c->remote_eof)) {
+        drop_conn(lp, c);
+    }
+}
+
 static void service_conn(loop_t *lp, loop_conn_t *c,
                          short local_re, short remote_re) {
+    if (c->direct) {
+        service_direct(lp, c, local_re, remote_re);
+        return;
+    }
+    c->last_io_ms = loop_now_ms();
 /* pump remote output when it is ready */
     if (remote_re & (POLLIN | POLLOUT | POLLHUP | POLLERR)) {
         session_pump_remote(&c->sess);
@@ -814,15 +1150,33 @@ static void service_conn(loop_t *lp, loop_conn_t *c,
     }
 }
 
-static long loop_now_ms(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (long)tv.tv_sec * 1000L + (long)(tv.tv_usec / 1000);
+static void drop_idle_conns(loop_t *lp) {
+    long now = 0;
+    for (size_t i = 0; i < LOOP_MAX_CONNS; ++i) {
+        loop_conn_t *c = lp->conns[i];
+        if (!c || !c->used || c->opening || c->sniffing) continue;
+        if (!now) now = loop_now_ms();
+        if (now - c->last_io_ms < LOOP_IDLE_MS) continue;
+        fprintf(stderr, "legacyrayd: dropping a connection idle for %ld s\n",
+                (now - c->last_io_ms) / 1000);
+        drop_conn(lp, c);
+    }
+}
+
+void loop_set_router(loop_t *lp, loop_route_fn route, loop_bypass_fn bypass,
+                     void *ctx) {
+    if (!lp) return;
+    lp->route = route;
+    lp->bypass = bypass;
+    lp->route_ctx = ctx;
 }
 
 size_t loop_prepare(loop_t *lp, struct pollfd *pfd, size_t cap) {
     if (!lp || !pfd || cap < 3) return 0;
     reap_opening_conns(lp);
+    sniff_deadlines(lp);
+    drop_idle_conns(lp);
+    free_unused_slots(lp);
 
     loop_conn_t **map = lp->poll_map;
     uint8_t *is_remote = lp->poll_remote;
@@ -855,13 +1209,45 @@ size_t loop_prepare(loop_t *lp, struct pollfd *pfd, size_t cap) {
     lp->poll_conn_base = nf;
 
     for (size_t i = 0; i < LOOP_MAX_CONNS && nf + 2 <= cap; ++i) {
-        loop_conn_t *c = &lp->conns[i];
-        if (!c->used) continue;
+        loop_conn_t *c = lp->conns[i];
+        if (!c || !c->used) continue;
+
+        if (c->sniffing) {
+            short lev = POLLIN;
+            if (c->pend_off < c->pend_len) lev |= POLLOUT;
+            pfd[nf].fd = c->local_fd;
+            pfd[nf].events = lev;
+            pfd[nf].revents = 0;
+            map[nf] = c; is_remote[nf] = 0;
+            nf++;
+            continue;
+        }
+
+        if (c->direct && !c->opening) {
+            short lev = 0;
+            if (!c->local_eof && c->prebuf_len < sizeof c->prebuf) lev |= POLLIN;
+            if (c->pend_off < c->pend_len) lev |= POLLOUT;
+            pfd[nf].fd = c->local_fd;
+            pfd[nf].events = lev;
+            pfd[nf].revents = 0;
+            map[nf] = c; is_remote[nf] = 0;
+            nf++;
+            short rev = 0;
+            if (!c->remote_eof && c->pend_off >= c->pend_len) rev |= POLLIN;
+            if (c->prebuf_len > 0) rev |= POLLOUT;
+            pfd[nf].fd = c->remote_fd;
+            pfd[nf].events = rev;
+            pfd[nf].revents = 0;
+            map[nf] = c; is_remote[nf] = 1;
+            nf++;
+            continue;
+        }
 
         if (c->opening) {
         /* wake the loop after cancellation */
             if (c->local_fd < 0) continue;
-            short lev = POLLIN;
+            /* a full prebuf would only spin the loop until the worker is done */
+            short lev = c->prebuf_len < sizeof c->prebuf ? POLLIN : 0;
             if (c->pend_off < c->pend_len) lev |= POLLOUT;
             pfd[nf].fd = c->local_fd;
             pfd[nf].events = lev;
@@ -926,6 +1312,11 @@ void loop_dispatch(loop_t *lp, const struct pollfd *pfd, size_t nf) {
             service_opening_local(lp, c, pfd[i].revents);
             continue;
         }
+        if (c->sniffing) {
+            service_sniffing(lp, c, pfd[i].revents);
+            map[i] = NULL;
+            continue;
+        }
 
         short local_re = 0, remote_re = 0;
         if (is_remote[i]) remote_re = pfd[i].revents;
@@ -949,10 +1340,17 @@ int loop_timeout_ms(const loop_t *lp) {
     if (!lp) return -1;
     long best = -1, now = 0;
     for (size_t i = 0; i < LOOP_MAX_CONNS; ++i) {
-        const loop_conn_t *c = &lp->conns[i];
-        if (!c->used || c->opening || c->sess.state != SESS_VISION_FIRST) continue;
+        const loop_conn_t *c = lp->conns[i];
+        if (!c || !c->used || c->opening) continue;
+        long deadline;
+        if (c->sniffing) deadline = c->sniff_deadline_ms;
+        else if (!c->direct && c->sess.state == SESS_VISION_FIRST)
+            deadline = c->sess.vision_first_deadline_ms;
+        else if (!c->sniffing)
+            deadline = c->last_io_ms + LOOP_IDLE_MS;
+        else continue;
         if (!now) now = loop_now_ms();
-        long left = c->sess.vision_first_deadline_ms - now;
+        long left = deadline - now;
         if (left < 0) left = 0;
         if (best < 0 || left < best) best = left;
     }
@@ -995,18 +1393,19 @@ int loop_tproxy_seen(const loop_t *lp, uint64_t after_generation,
 void loop_close(loop_t *lp) {
     if (!lp) return;
     for (size_t i = 0; i < LOOP_MAX_CONNS; ++i) {
-        if (lp->conns[i].used) drop_conn(lp, &lp->conns[i]);
+        if (lp->conns[i] && lp->conns[i]->used) drop_conn(lp, lp->conns[i]);
     }
     for (size_t i = 0; i < LOOP_MAX_CONNS; ++i) {
-        loop_conn_t *c = &lp->conns[i];
-        if (!c->used || !c->opening) continue;
+        loop_conn_t *c = lp->conns[i];
+        if (!c || !c->used || !c->opening) continue;
         pthread_join(c->open_thread, NULL);
-        if (c->open_th && c->open_vt) c->open_vt->close(c->open_th);
+        if (c->open_th && c->open_vt && !c->direct) c->open_vt->close(c->open_th);
         if (c->remote_fd >= 0) close(c->remote_fd);
         if (c->local_fd >= 0) close(c->local_fd);
         if (lp->nopening > 0) lp->nopening--;
         clear_conn_slot(c);
     }
+    free_unused_slots(lp);
     loop_disable_tproxy(lp);
     if (lp->listen_fd >= 0) close(lp->listen_fd);
     if (lp->wake_rd >= 0) close(lp->wake_rd);

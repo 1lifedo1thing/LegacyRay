@@ -18,7 +18,9 @@ int main(void) {
     set_nonblock(local[1]);
     set_nonblock(remote[0]);
     set_nonblock(remote[1]);
-    loop_conn_t *c = &lp->conns[0];
+    loop_conn_t *c = calloc(1, sizeof *c);
+    assert(c);
+    lp->conns[0] = c;
     c->owner = lp;
     c->local_fd = local[0];
     c->remote_fd = remote[0];
@@ -67,6 +69,7 @@ int main(void) {
     lp->bytes_down = 123;
     loop_stop(lp);
     assert(lp->bytes_up == 0 && lp->bytes_down == 0);
+    free_unused_slots(lp);
     free(lp);
     puts("all loop traffic checks passed");
     return 0;

@@ -27,7 +27,7 @@ int  routing_fwd_up(routing_fwd_t *st, int socks_port,
 int  routing_fwd_app_proxy_up(routing_fwd_t *st, int socks_port);
 
 void routing_fwd_down(routing_fwd_t *st);
-void routing_fwd_bypass_add_ipv4(routing_fwd_t *st, const char *ip);
+int routing_fwd_bypass_add_ipv4(routing_fwd_t *st, const char *ip);
 void routing_fwd_clear_rules(void);
 
 #ifdef __cplusplus

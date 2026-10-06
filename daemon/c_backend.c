@@ -2,8 +2,13 @@
 
 #include "core/net_safe.h"
 
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+
+/* the open workers of direct connections and the control thread's probes
+   both add bypasses; the rule writers keep their own state */
+static pthread_mutex_t g_bypass_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void set_reason(char *reason, size_t cap, const char *text) {
     if (reason && cap) snprintf(reason, cap, "%s", text);
@@ -99,23 +104,35 @@ int c_backend_start(c_backend_t *cb, loop_t *loop, int socks_port,
 void c_backend_stop(c_backend_t *cb, loop_t *loop) {
     if (!cb) return;
     if (loop) loop_disable_tproxy(loop);
+    pthread_mutex_lock(&g_bypass_lock);
     routing_exec_down(&cb->rules);
     routing_fwd_down(&cb->fwd);
     memset(cb, 0, sizeof *cb);
+    pthread_mutex_unlock(&g_bypass_lock);
 }
 
 int c_backend_uses_tproxy(const c_backend_t *cb) {
     return cb && cb->active && !cb->app_proxy;
 }
 
-void c_backend_bypass_add_ipv4(c_backend_t *cb, const char *ip) {
+int c_backend_bypass_add_ipv4(c_backend_t *cb, const char *ip) {
     char literal[64];
     /* both rule writers paste the address straight into a pf table or an ipfw
        rule, so anything but a plain ipv4 literal has to stop here */
-    if (!cb || !cb->active || !net_ipv4_literal(ip, literal, sizeof literal))
-        return;
-    routing_exec_bypass_add_ipv4(&cb->rules, literal);
-    routing_fwd_bypass_add_ipv4(&cb->fwd, literal);
+    pthread_mutex_lock(&g_bypass_lock);
+    int rc = -1;
+    if (!cb || !cb->active) {
+        rc = -1;
+    } else if (cb->app_proxy) {
+        rc = 0; /* nothing redirects the daemon's own sockets */
+    } else if (net_ipv4_literal(ip, literal, sizeof literal)) {
+        if (cb->rules.mode != ROUTING_MODE_NONE)
+            rc = routing_exec_bypass_add_ipv4(&cb->rules, literal);
+        else if (cb->fwd.active)
+            rc = routing_fwd_bypass_add_ipv4(&cb->fwd, literal);
+    }
+    pthread_mutex_unlock(&g_bypass_lock);
+    return rc;
 }
 
 void c_backend_clear_stale(void) {

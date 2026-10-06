@@ -198,15 +198,18 @@ void routing_fwd_down(routing_fwd_t *st) {
     memset(st, 0, sizeof *st);
 }
 
-void routing_fwd_bypass_add_ipv4(routing_fwd_t *st, const char *ip) {
-    if (!st || !st->active || st->app_proxy || !ip || !ip[0]) return;
-    if (net_ip_list_contains(st->server_ips, ip)) return;
-    if (st->next_bypass_slot > FWD_RULE_MAX - 2) return;
+int routing_fwd_bypass_add_ipv4(routing_fwd_t *st, const char *ip) {
+    if (!st || !st->active || !ip || !ip[0]) return -1;
+    /* the connect hook redirects apps, never the daemon itself */
+    if (st->app_proxy) return 0;
+    if (net_ip_list_contains(st->server_ips, ip)) return 0;
+    if (st->next_bypass_slot > FWD_RULE_MAX - 2) return -1;
     char rule[256];
     if (snprintf(rule, sizeof rule, "%d allow tcp from any to %s",
                  st->next_bypass_slot, ip) >= (int)sizeof rule)
-        return;
-    if (ipfw_add(rule) != 0) return;
+        return -1;
+    if (ipfw_add(rule) != 0) return -1;
     st->next_bypass_slot++;
     note_server_ip(st, ip);
+    return 0;
 }

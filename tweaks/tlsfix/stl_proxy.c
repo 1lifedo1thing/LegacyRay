@@ -28,7 +28,10 @@ static const char *getprogname(void) { return "host-test"; }
 #ifndef C_PROXY_STATE
 #define C_PROXY_STATE "/var/run/legacyray-c-proxy"
 #endif
-#define C_PROXY_TIMEOUT_SEC 12
+/* legacyrayd answers the socks exchange itself, before it dials anything, so
+   a daemon that takes longer than this is wedged and the app is better off
+   with an error than a frozen connect */
+#define C_PROXY_TIMEOUT_SEC 5
 
 static int (*orig_connect)(int, const struct sockaddr *, socklen_t);
 

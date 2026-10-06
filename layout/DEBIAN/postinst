@@ -117,11 +117,30 @@ if [ "${SENKO_SKIP_RESPRING:-0}" != "1" ]; then
   if [ -z "$2" ] || [ "$WAS_IN_CACHE" = 1 ]; then RESPRING=1; fi
 fi
 
+# builds before 1.0.1 shipped the icon prerendered, without the system's
+# shine. springboard keeps the icons it has drawn in an image cache and does
+# not redraw them when an app is only upgraded, so the old flat icon stayed
+# after the system was asked to draw the gloss. dropping that cache (ios 4-6
+# image cache files, the ios 7 IconsCache folder) and restarting springboard
+# makes it draw the icon again, with the gloss
+ICON_REDRAW=0
+if [ -n "$2" ] && dpkg --compare-versions "$2" lt 1.0.1 2>/dev/null; then
+  ICON_REDRAW=1
+  rm -f /var/mobile/Library/Caches/com.apple.springboard-imagecache-icons \
+        /var/mobile/Library/Caches/com.apple.springboard-imagecache-icons.plist \
+        /var/mobile/Library/Caches/com.apple.springboard-imagecache-smallicons \
+        /var/mobile/Library/Caches/com.apple.springboard-imagecache-smallicons.plist \
+        2>/dev/null || true
+  rm -rf /var/mobile/Library/Caches/com.apple.IconsCache 2>/dev/null || true
+  [ "${SENKO_SKIP_RESPRING:-0}" != "1" ] && RESPRING=1
+fi
+
 LOG_TO=/dev/null
 true 2>/dev/null >"$INSTALL_LOG" && LOG_TO=$INSTALL_LOG
 (
   trap '' HUP
   echo "postinst $1 ${2:-none} $(date)"
+  [ "$ICON_REDRAW" = 1 ] && echo "springboard icon cache dropped for the system gloss"
   rm -f "$UICACHE_DONE"
   ( uicache 2>&1; echo $? > "$UICACHE_DONE" ) &
   waited=0

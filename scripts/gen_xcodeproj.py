@@ -165,7 +165,7 @@ core = ['vless.c', 'b64.c', 'config.c', 'rules.c', 'dns_msg.c', 'dns_cache.c', '
         'tls_clienthello.c', 'tls13_kdf.c', 'tls13_keysched.c', 'tls13_record.c', 'tls13_transcript.c',
         'tls13_handshake.c', 'reality_handshake.c', 'socks5_client.c', 'http_client.c', 'vision.c',
         'awg_config.c', 'awg_handshake.c', 'awg_tunnel.c', 'trojan_client.c', 'shadowsocks_client.c',
-        'blake2b256.c', 'geo.c', 'frag.c']
+        'blake2b256.c', 'geo.c', 'frag.c', 'sniff.c']
 daemon_main = ['dialer.c', 'loop.c', 'pf_natlook.c', 'ctl_server.c', 'daemon_ctl.c', 'storefile.c',
                'netwatch.c', 'geo_ctl.c', 'settings.c', 'status.c', 'routing.c', 'routing_exec.c',
                'routing_fwd.c', 'pf_table.c', 'c_backend.c', 'go_config.c', 'go_backend.c', 'awg_utun.c',

@@ -46,7 +46,10 @@ void c_backend_stop(c_backend_t *cb, loop_t *loop);
 int  c_backend_uses_tproxy(const c_backend_t *cb);
 
 /* keep legacyrayd's own probes off the redirect so they measure the real path */
-void c_backend_bypass_add_ipv4(c_backend_t *cb, const char *ip);
+/* 0 when a connection from the daemon to ip goes straight out: the firewall
+   was told to let it pass, or nothing redirects the daemon in the first
+   place (the connect hook only lives in apps). safe from any thread */
+int c_backend_bypass_add_ipv4(c_backend_t *cb, const char *ip);
 
 /* drop rules a crash left behind before installing a new catch-all */
 void c_backend_clear_stale(void);

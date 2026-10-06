@@ -380,11 +380,15 @@ int main(int argc, char **argv) {
         int full_device = 0;
         parse_managed_args(argc, argv, &ctl_path, &config_path, &settings, &full_device);
         if (config_path[0]) {
-            /* half a megabyte of servers does not fit the small default stack
-               on ios 5, and the daemon reads the config once at startup */
-            static store_t preload;
-            store_init(&preload);
-            storefile_load(&preload, &settings, config_path);
+            /* two megabytes of servers do not fit the small default stack on
+               ios 5, and only the settings are wanted from this first read,
+               so the store goes back to the system right after */
+            store_t *preload = (store_t *)calloc(1, sizeof *preload);
+            if (preload) {
+                store_init(preload);
+                storefile_load(preload, &settings, config_path);
+                free(preload);
+            }
             parse_managed_args(argc, argv, &ctl_path, &config_path, &settings, &full_device);
         }
         return run_managed(ctl_path, config_path, full_device, &settings);

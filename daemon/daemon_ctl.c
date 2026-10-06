@@ -22,6 +22,7 @@
 #include "routing.h"
 #include "routing_exec.h"
 #include "core/reality_handshake.h"
+#include "core/geo.h"
 #include "../common/senko_paths.h"
 
 #include <errno.h>
@@ -237,6 +238,95 @@ static int c_backend_verify(void *ctx) {
     return routing_path_probe((daemon_ctl_t *)ctx, 2000);
 }
 
+/* split tunnelling in the loop. the firewall only ever shows the daemon an
+   address and the connect hook has no firewall at all, so the list of sites
+   is applied here, to each connection, by the name the client is about to
+   send. the dns-driven pf table stays as the fast path where pf exists */
+static loop_route_t route_of(rule_action_t a) {
+    if (a == RULE_ACTION_BLOCK) return LOOP_ROUTE_BLOCK;
+    if (a == RULE_ACTION_DIRECT) return LOOP_ROUTE_DIRECT;
+    return LOOP_ROUTE_PROXY;
+}
+
+static int rules_name_based(const ruleset_t *rules) {
+    for (size_t i = 0; i < rules->count; ++i) {
+        rule_type_t t = rules->entries[i].type;
+        if (t == RULE_TYPE_DOMAIN_SUFFIX || t == RULE_TYPE_DOMAIN_KEYWORD ||
+            t == RULE_TYPE_DOMAIN_FULL || t == RULE_TYPE_GEOSITE)
+            return 1;
+    }
+    return 0;
+}
+
+/* address facts: cidr rules, geoip countries and ports, highest verdict wins
+   like everywhere else (block > direct > proxy). SIZE_MAX in *hit: none */
+static rule_action_t match_address(ruleset_t *rules, const vless_dest_t *dest,
+                                   int *hit) {
+    rule_action_t best = RULE_ACTION_PROXY;
+    *hit = 0;
+    char ip[INET6_ADDRSTRLEN];
+    if (dest->atyp == VLESS_ADDR_IPV4 &&
+        inet_ntop(AF_INET, dest->host_addr, ip, sizeof ip)) {
+        size_t idx = SIZE_MAX;
+        rule_action_t a = ruleset_match_ip(rules, ip, &idx);
+        if (idx != SIZE_MAX) { best = a; *hit = 1; }
+    } else if (dest->atyp == VLESS_ADDR_IPV6 &&
+               inet_ntop(AF_INET6, dest->host_addr, ip, sizeof ip)) {
+        size_t idx = SIZE_MAX;
+        rule_action_t a = ruleset_match_ip(rules, ip, &idx);
+        if (idx != SIZE_MAX) { best = a; *hit = 1; }
+    }
+    for (size_t i = 0; i < rules->count; ++i) {
+        rule_t *r = &rules->entries[i];
+        int m = 0;
+        if (r->type == RULE_TYPE_GEOIP && dest->atyp == VLESS_ADDR_IPV4)
+            m = geo_ip_match(r->value, dest->host_addr) != 0;
+        else if (rule_is_port(r))
+            m = dest->port >= r->port_lo && dest->port <= r->port_hi;
+        if (!m) continue;
+        if (!*hit || (r->action == RULE_ACTION_BLOCK) ||
+            (r->action == RULE_ACTION_DIRECT && best == RULE_ACTION_PROXY)) {
+            best = r->action;
+            *hit = 1;
+        }
+        (void)__sync_fetch_and_add(&r->hits, 1);
+    }
+    return best;
+}
+
+static loop_route_t daemon_route(void *ctx, const vless_dest_t *dest, const char *host) {
+    daemon_ctl_t *d = (daemon_ctl_t *)ctx;
+    if (!d || !dest || !d->settings.rules_enabled || !d->rules) return LOOP_ROUTE_PROXY;
+    /* a socks request by name comes from the daemon's own probes or from a
+       client on the lan, never from the connect hook: it keeps the tunnel */
+    if (dest->atyp == VLESS_ADDR_DOMAIN) return LOOP_ROUTE_PROXY;
+    ruleset_t *rules = d->rules;
+    rule_action_t fallback = d->settings.rules_default ? RULE_ACTION_DIRECT
+                                                       : RULE_ACTION_PROXY;
+    int hit = 0;
+    rule_action_t by_address = match_address(rules, dest, &hit);
+    if (!host) {
+        /* a block or a direct rule on the address is final; a name could only
+           raise a proxy verdict, so those wait for it when names are listed */
+        if (hit && by_address != RULE_ACTION_PROXY) return route_of(by_address);
+        if (!rules_name_based(rules)) return route_of(hit ? by_address : fallback);
+        return LOOP_ROUTE_SNIFF;
+    }
+    if (host[0]) {
+        size_t idx = SIZE_MAX;
+        rule_action_t by_name = ruleset_match_domain(rules, host, &idx);
+        if (idx != SIZE_MAX) return route_of(by_name);
+    }
+    return route_of(hit ? by_address : fallback);
+}
+
+static int daemon_bypass(void *ctx, const char *ipv4) {
+    daemon_ctl_t *d = (daemon_ctl_t *)ctx;
+    if (!d) return -1;
+    if (!ipv4) return d->c_backend.app_proxy ? 0 : -1;
+    return c_backend_bypass_add_ipv4(&d->c_backend, ipv4);
+}
+
 int daemon_ctl_apply(void *ctx, const ctl_action_t *action) {
     daemon_ctl_t *d = (daemon_ctl_t *)ctx;
     if (!d || !d->loop || !action) return -1;
@@ -287,6 +377,7 @@ int daemon_ctl_apply(void *ctx, const ctl_action_t *action) {
                 }
             }
 
+            loop_set_router(d->loop, NULL, NULL, NULL);
             if (d->full_device && (d->go.active || d->c_backend.active)) {
                 go_backend_stop(&d->go);
                 c_backend_stop(&d->c_backend, d->loop);
@@ -376,12 +467,15 @@ int daemon_ctl_apply(void *ctx, const ctl_action_t *action) {
                 if (c_backend_uses_tproxy(&d->c_backend))
                     fprintf(stderr, "legacyrayd: c backend: transparent tcp on port %d\n",
                             d->c_backend.redir_port);
+                if (d->c_backend.active)
+                    loop_set_router(d->loop, daemon_route, daemon_bypass, d);
             }
             return 0;
         }
 
         case CTL_ACT_STOP:
             status_set(0);
+            loop_set_router(d->loop, NULL, NULL, NULL);
             if (d->full_device) {
                 go_backend_stop(&d->go);
                 c_backend_stop(&d->c_backend, d->loop);

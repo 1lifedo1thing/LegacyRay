@@ -196,6 +196,8 @@ static LRDaemonSettings *DS(void) { return [LRDaemonSettings shared]; }
     _busy = YES;
     [self reloadSections];
     [LRRoutingProfiles changeRules:^(void (^finish)(void)) {
+        /* a list nobody switched on would never apply */
+        if (![DS() boolForKey:@"rules_enabled" fallback:YES]) [DS() setBool:YES forKey:@"rules_enabled"];
         [self addSpecs:specs done:^(NSUInteger failed) {
             self->_busy = NO;
             [self load];

@@ -128,7 +128,8 @@ int routing_exec_egress_snapshot(char *name, size_t name_cap,
                                  char *ip, size_t ip_cap);
 
 /* add a live bypass so probes do not loop through the redirect */
-void routing_exec_bypass_add_ipv4(routing_exec_t *st, const char *ip);
+/* 0 once a direct connection to ip can no longer be redirected */
+int routing_exec_bypass_add_ipv4(routing_exec_t *st, const char *ip);
 
 #ifdef __cplusplus
 }

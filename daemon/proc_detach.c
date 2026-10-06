@@ -13,7 +13,11 @@
    with the ui that started it. the daemon has to declare for itself that it is
    a daemon; nothing about the way it was launched can do that for it */
 
-#define MEMORYSTATUS_CMD_SET_PRIORITY_PROPERTIES 1
+/* xnu's kern_memorystatus.h; 1 is GET_PRIORITY_LIST, which made the call a
+   harmless read instead of the band change it was meant to be */
+#define MEMORYSTATUS_CMD_SET_PRIORITY_PROPERTIES 2
+#define MEMORYSTATUS_CMD_SET_JETSAM_HIGH_WATER_MARK 5
+#define MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT 6
 /* the band the system keeps its own long-lived daemons in */
 #define SENKO_JETSAM_PRIORITY 19
 
@@ -41,4 +45,14 @@ void senko_proc_detach(void) {
     props.user_data = 0;
     (void)set_band(MEMORYSTATUS_CMD_SET_PRIORITY_PROPERTIES, (int32_t)getpid(),
                    0, &props, sizeof props);
+
+    /* a launchd job the system's jetsam tables do not name gets the default
+       memory limit of the device class, small enough on some ipads to kill the
+       daemon before its control socket opens. 0 lifts the limit: ios 8
+       knows it as the high water mark, ios 9 and later as the task limit; a
+       system that knows neither answers EINVAL */
+    (void)set_band(MEMORYSTATUS_CMD_SET_JETSAM_HIGH_WATER_MARK, (int32_t)getpid(),
+                   0, NULL, 0);
+    (void)set_band(MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT, (int32_t)getpid(),
+                   0, NULL, 0);
 }

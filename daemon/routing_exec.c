@@ -36,7 +36,23 @@ extern char **environ;
 #define PF_ANCHOR "com.apple/legacyray"
 #define PF_CONF_CAP (512u * 1024u)
 
-static dns_cache_t g_dns_cache;
+/* the answer cache and the bypass shadow run to megabytes. they live on the
+   heap from the first tunnel on: calloc hands back untouched zero pages, where
+   a static that is memset on every connect stays dirty for the daemon's whole
+   life and counts against a memory limit the system may enforce */
+static dns_cache_t *g_dns_cache_p;
+static pf_table_t *g_pf_table_p;
+#define g_dns_cache (*g_dns_cache_p)
+#define g_pf_table (*g_pf_table_p)
+
+/* fresh, zeroed tables for a tunnel coming up */
+static int tables_reset(void) {
+    free(g_dns_cache_p);
+    free(g_pf_table_p);
+    g_dns_cache_p = (dns_cache_t *)calloc(1, sizeof *g_dns_cache_p);
+    g_pf_table_p = (pf_table_t *)calloc(1, sizeof *g_pf_table_p);
+    return g_dns_cache_p && g_pf_table_p ? 0 : -1;
+}
 /* legacyray: what a name no rule matched gets. proxy keeps the stock
    full-tunnel behaviour; direct turns the rules into a proxy allow-list */
 static rule_action_t g_default_action = RULE_ACTION_PROXY;
@@ -45,7 +61,6 @@ void routing_exec_set_default_action(rule_action_t action) {
     g_default_action = action == RULE_ACTION_DIRECT ? RULE_ACTION_DIRECT
                                                     : RULE_ACTION_PROXY;
 }
-static pf_table_t g_pf_table;
 static uint32_t g_pf_cleanup_added[PF_TABLE_MAX_ADDRS];
 static uint32_t g_pf_cleanup_deleted[PF_TABLE_MAX_ADDRS];
 
@@ -1072,6 +1087,18 @@ static void stop_dns_forwarder(routing_exec_t *st) {
     close_dns_socket(st);
 }
 
+/* the system resolver keeps answers it got before the rules went up, and an
+   app connecting to one of those never asks the dns forwarder, so its site
+   never reaches the bypass table. mDNSResponder drops its cache on HUP */
+static void flush_system_dns(void) {
+    static const char *const paths[] = { "/usr/bin/killall", "/bin/killall",
+                                         SENKO_USR_BIN "/killall" };
+    const char *killall = find_first(paths, sizeof paths / sizeof paths[0]);
+    if (!killall) return;
+    char *argv[] = { (char *)killall, (char *)"-HUP", (char *)"mDNSResponder", NULL };
+    (void)run_spawn_quiet(killall, argv);
+}
+
 rexec_status_t routing_exec_up(routing_exec_t *st, int socks_port,
                                const char *server_ip, const char *server_ips,
                                const char *dns_upstream, int dns_local_port,
@@ -1083,8 +1110,7 @@ rexec_status_t routing_exec_up(routing_exec_t *st, int socks_port,
         routing_exec_down(st);
     }
     memset(st, 0, sizeof *st);
-    dns_cache_init(&g_dns_cache);
-    pf_table_init(&g_pf_table);
+    if (tables_reset() != 0) return REXEC_ERR_SPAWN;
     st->dns_fd = -1;
     st->socks_port = socks_port;
     st->rules = rules;
@@ -1162,6 +1188,7 @@ rexec_status_t routing_exec_up(routing_exec_t *st, int socks_port,
                         return REXEC_ERR_SPAWN;
                     }
                     pf_geo_tables(st);
+                    flush_system_dns();
                     return REXEC_OK;
                 }
             }
@@ -1188,6 +1215,7 @@ rexec_status_t routing_exec_up(routing_exec_t *st, int socks_port,
                 routing_exec_down(st);
                 return REXEC_ERR_SPAWN;
             }
+            flush_system_dns();
             return REXEC_OK;
         }
         fprintf(stderr, "legacyrayd: ipfw rules rejected\n");
@@ -1214,6 +1242,13 @@ void routing_exec_down(routing_exec_t *st) {
 
 void routing_exec_dns_stats(uint64_t *hits, uint64_t *misses,
                             uint64_t *stale_hits, size_t *entries) {
+    if (!g_dns_cache_p) {
+        if (hits) *hits = 0;
+        if (misses) *misses = 0;
+        if (stale_hits) *stale_hits = 0;
+        if (entries) *entries = 0;
+        return;
+    }
     if (hits) *hits = g_dns_cache.hits;
     if (misses) *misses = g_dns_cache.misses;
     if (stale_hits) *stale_hits = g_dns_cache.stale_hits;
@@ -1223,6 +1258,12 @@ void routing_exec_dns_stats(uint64_t *hits, uint64_t *misses,
 void routing_exec_bypass_stats(pf_table_counts_t *counts,
                                uint64_t *evicted_addresses,
                                uint64_t *evicted_refs) {
+    if (!g_pf_table_p) {
+        if (counts) memset(counts, 0, sizeof *counts);
+        if (evicted_addresses) *evicted_addresses = 0;
+        if (evicted_refs) *evicted_refs = 0;
+        return;
+    }
     if (counts) pf_table_counts(&g_pf_table, counts);
     if (evicted_addresses) *evicted_addresses = g_pf_table.evicted_addresses;
     if (evicted_refs) *evicted_refs = g_pf_table.evicted_refs;
@@ -1234,7 +1275,7 @@ void routing_exec_flush_dns(routing_exec_t *st) {
         dns_wake(st);
         return;
     }
-    dns_cache_clear(&g_dns_cache);
+    if (g_dns_cache_p) dns_cache_clear(&g_dns_cache);
 }
 
 void routing_exec_flush_bypass(routing_exec_t *st) {
@@ -1243,7 +1284,7 @@ void routing_exec_flush_bypass(routing_exec_t *st) {
         dns_wake(st);
         return;
     }
-    pf_table_clear(&g_pf_table);
+    if (g_pf_table_p) pf_table_clear(&g_pf_table);
 }
 
 /* pf gets its ruleset as a file, so the file pfctl loaded is the honest answer.
@@ -1291,32 +1332,28 @@ int routing_exec_render(const routing_exec_t *st, char *buf, size_t cap,
     return -1;
 }
 
-void routing_exec_bypass_add_ipv4(routing_exec_t *st, const char *ip) {
-    if (!st || !ip || !ip[0] || st->mode == ROUTING_MODE_NONE) return;
+int routing_exec_bypass_add_ipv4(routing_exec_t *st, const char *ip) {
+    if (!st || !ip || !ip[0] || st->mode == ROUTING_MODE_NONE) return -1;
 
-    if (st->mode == ROUTING_MODE_PF && st->pf_table_ready) {
+    if (st->mode == ROUTING_MODE_PF) {
+        /* the compat ruleset has its bypass written into the rule itself */
+        if (!st->pf_table_ready) return -1;
         const char *pfctl = routing_find_pfctl();
-        if (!pfctl) return;
+        if (!pfctl) return -1;
         char addr[64];
         snprintf(addr, sizeof addr, "%s/32", ip);
         char *argv[] = { (char *)pfctl, (char *)"-t", (char *)"legacyray_bypass",
                          (char *)"-T", (char *)"add", addr, NULL };
-        (void)run_spawn_quiet(pfctl, argv);
-        return;
+        return run_spawn_quiet(pfctl, argv) == 0 ? 0 : -1;
     }
 
     if (st->mode == ROUTING_MODE_IPFW) {
         const char *ipfw = routing_find_ipfw();
-        if (!ipfw || !st->server_ip[0]) return;
-        if (net_ip_list_contains(st->server_ips, ip)) return;
+        if (!ipfw || !st->server_ip[0]) return -1;
+        if (net_ip_list_contains(st->server_ips, ip)) return 0;
         size_t len = strlen(st->server_ips);
         size_t iplen = strlen(ip);
-        if (len + iplen + 2 >= sizeof st->server_ips) return;
-        if (len > 0) {
-            st->server_ips[len++] = ',';
-            st->server_ips[len] = '\0';
-        }
-        memcpy(st->server_ips + len, ip, iplen + 1);
+        if (len + iplen + 2 >= sizeof st->server_ips) return -1;
         /* an unnumbered rule lands after the catch-all fwd, where it can never
            match, and outside the range clear_ipfw sweeps on teardown */
         char rule[256];
@@ -1324,15 +1361,22 @@ void routing_exec_bypass_add_ipv4(routing_exec_t *st, const char *ip) {
                  ROUTING_IPFW_BASE + 1, ip);
         char *argv[36];
         int argc = split_rule_words(rule, argv, 36);
-        if (argc <= 0) return;
+        if (argc <= 0) return -1;
         char *full[38];
         int n = 0;
         full[n++] = (char *)ipfw;
         full[n++] = (char *)"-q";
         for (int i = 0; i < argc && n < 37; ++i) full[n++] = argv[i];
         full[n] = NULL;
-        (void)routing_spawn(ipfw, full);
+        if (routing_spawn(ipfw, full) != 0) return -1;
+        if (len > 0) {
+            st->server_ips[len++] = ',';
+            st->server_ips[len] = '\0';
+        }
+        memcpy(st->server_ips + len, ip, iplen + 1);
+        return 0;
     }
+    return -1;
 }
 
 void routing_exec_clear_stale(void) {

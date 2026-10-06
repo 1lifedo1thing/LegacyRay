@@ -13,14 +13,34 @@
 extern "C" {
 #endif
 
-#define LOOP_MAX_CONNS 96
+/* a slot is only allocated while its connection lives, so the cap costs
+   nothing until a page actually opens that many */
+#define LOOP_MAX_CONNS 192
 /* allow safari bursts so connection drops do not force page reloads */
-#define LOOP_MAX_OPENING 48
+#define LOOP_MAX_OPENING 64
 #define LOOP_PREBUF_CAP (16 * 1024)
 /* listener, transparent listener, wake pipe, then two sockets per conn */
 #define LOOP_POLLFD_MAX (3 + 2 * LOOP_MAX_CONNS)
 
 typedef int (*loop_dialer_fn)(void *ctx);
+
+/* where a connection goes. the router is asked first with no name: it answers
+   from the address alone, or with LOOP_ROUTE_SNIFF when only the site name
+   the client is about to send can decide. it is then asked again with the
+   name ("" when none could be read) and must not answer SNIFF a second time */
+typedef enum {
+    LOOP_ROUTE_PROXY = 0,
+    LOOP_ROUTE_DIRECT,
+    LOOP_ROUTE_BLOCK,
+    LOOP_ROUTE_SNIFF
+} loop_route_t;
+
+typedef loop_route_t (*loop_route_fn)(void *ctx, const vless_dest_t *dest,
+                                      const char *host);
+/* make a direct connection to this ipv4 address safe to dial, ie keep the
+   firewall redirect from sending it straight back to the daemon. runs on a
+   worker thread; 0 when the address may be dialled */
+typedef int (*loop_bypass_fn)(void *ctx, const char *ipv4);
 
 typedef struct {
     struct loop *owner;
@@ -56,6 +76,22 @@ typedef struct {
 /* preserve the destination captured before the transparent handshake */
     int        transparent;
     vless_dest_t tproxy_dest;
+
+/* the router wants the site name: wait for the client's first bytes */
+    int        sniffing;
+    long       sniff_deadline_ms;
+/* relay raw bytes to the destination itself, around the tunnel */
+    int        direct;
+    int        local_eof;
+    int        remote_eof;
+    long       last_io_ms;
+
+/* the socks request is answered as soon as it is read, so the hooked
+   connect() in an app returns at once instead of after the whole tunnel
+   handshake; the reply the session produces later is dropped */
+    int        socks_req_done;
+    size_t     socks_req_len;
+    size_t     socks_reply_skip;
 
 /* retain early client bytes until the remote transport is ready */
     int        socks_greet_done;
@@ -106,7 +142,11 @@ typedef struct loop {
     uint64_t bytes_up;
     uint64_t bytes_down;
 
-    loop_conn_t conns[LOOP_MAX_CONNS];
+    loop_conn_t *conns[LOOP_MAX_CONNS];
+
+    loop_route_fn  route;
+    loop_bypass_fn bypass;
+    void          *route_ctx;
     size_t      nconns;
     size_t      nopening;
 
@@ -156,6 +196,10 @@ loop_status_t loop_set_server(loop_t *lp, const transport_vt_t *vt,
                               const char *path, const char *ws_host,
                               const char *xhttp_mode, const char *peer_host,
                               int insecure);
+
+/* split routing: NULL route sends everything through the tunnel */
+void loop_set_router(loop_t *lp, loop_route_fn route, loop_bypass_fn bypass,
+                     void *ctx);
 
 /* stop traffic while keeping the listener ready for the next selection */
 void loop_stop(loop_t *lp);

@@ -56,6 +56,8 @@ HOST_TESTS += test_legacyray
 HOST_TESTS += test_qr_encode
 HOST_TESTS += test_site
 HOST_TESTS += test_dialer
+HOST_TESTS += test_sniff
+HOST_TESTS += test_loop_route
 
 all: test
 
@@ -69,6 +71,8 @@ test: $(HOST_TESTS)
 	./test_dialer
 	./test_traffic
 	./test_loop_traffic
+	./test_sniff
+	./test_loop_route
 	./test_rules
 	./test_dns_msg
 	./test_dns_cache
@@ -124,9 +128,22 @@ test_dns_cache: test_dns_cache.c $(CORE)/dns_cache.c $(CORE)/dns_cache.h \
 test_pf_table: test_pf_table.c $(DAEMON)/pf_table.c $(DAEMON)/pf_table.h $(CORE)/rules.h
 	$(CC) $(CFLAGS) -I$(DAEMON) test_pf_table.c $(DAEMON)/pf_table.c -o $@
 
+LOOP_DEPS = $(DAEMON)/pf_natlook.c $(CORE)/session.c $(CORE)/socks5.c $(NET_SAFE) \
+	      $(CORE)/sniff.c $(CORE)/vless.c $(CORE)/vless_conn.c $(CORE)/socks5_client.c \
+	      $(CORE)/http_client.c $(CORE)/vision.c $(CORE)/transport_tcp.c \
+	      $(CORE)/trojan_client.c $(CORE)/shadowsocks_client.c $(CORE)/reality_crypto.c \
+	      $(TRACE) $(REPLAY) $(UPLOAD)
+
+test_sniff: test_sniff.c $(CORE)/sniff.c $(CORE)/sniff.h
+	$(CC) $(CFLAGS) test_sniff.c $(CORE)/sniff.c -o $@
+
+test_loop_route: test_loop_route.c $(DAEMON)/loop.c $(DAEMON)/loop.h $(CORE)/sniff.c
+	$(CC) $(CFLAGS) $(TLS_CFLAGS) $(THREAD_CFLAGS) -DSENKO_RELEASE -I$(DAEMON) test_loop_route.c \
+	      $(LOOP_DEPS) -o $@ $(TLS_LDFLAGS) $(THREAD_LDFLAGS)
+
 test_loop_traffic: test_loop_traffic.c $(DAEMON)/loop.c $(CORE)/session.c
 	$(CC) $(CFLAGS) $(TLS_CFLAGS) $(THREAD_CFLAGS) -DSENKO_RELEASE -I$(DAEMON) test_loop_traffic.c \
-	      $(DAEMON)/pf_natlook.c $(CORE)/session.c $(CORE)/socks5.c $(NET_SAFE) \
+	      $(CORE)/sniff.c $(DAEMON)/pf_natlook.c $(CORE)/session.c $(CORE)/socks5.c $(NET_SAFE) \
 	      $(CORE)/vless.c $(CORE)/vless_conn.c $(CORE)/socks5_client.c \
 	      $(CORE)/http_client.c $(CORE)/vision.c $(CORE)/transport_tcp.c \
 	      $(CORE)/trojan_client.c $(CORE)/shadowsocks_client.c $(CORE)/reality_crypto.c \
